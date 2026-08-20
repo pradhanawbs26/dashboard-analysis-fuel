@@ -138,7 +138,8 @@ export async function fetchAllMonthlyReports(): Promise<MonthlyReportData[]> {
     // Sort by monthIndex ascending
     return results.sort((a, b) => a.monthIndex - b.monthIndex);
   } catch (error) {
-    handleFirestoreError(error, OperationType.LIST, MONTHLY_COLLECTION);
+    console.error("fetchAllMonthlyReports error:", error);
+    return [];
   }
 }
 

@@ -26,10 +26,12 @@ import html2canvas from "html2canvas-pro";
 import { normalizeDateToYMD } from "../data/sampleData";
 import { 
   subscribeToMonthlyReports, 
+  fetchAllMonthlyReports,
   saveMonthlyReportToFirestore, 
   deleteMonthlyReport, 
   testConnection 
 } from "../lib/firebase";
+import { getSyncLocalData, saveLocalData, removeLocalData } from "../lib/storage";
 import { MonthlyReportData } from "../types";
 
 interface YearlyReviewProps {
@@ -115,14 +117,14 @@ const SAMPLE_YEARLY_DATA = [
 ];
 
 export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
-  // Parsed records grouped by month and typeAlat
+  // Parsed records grouped by month and typeAlat - initialize from local storage cache for 0ms refresh flicker
   const [dataPoints, setDataPoints] = useState<Array<{
     bulan: string;      // Month name
     typeAlat: string;   // Equipment type name
     totalVolume: number;
     totalHours: number;
     recordCount: number;
-  }>>([]); // Start empty, no dummy or sample data on first load
+  }>>(() => getSyncLocalData("yearly_data_points", []));
 
   const [activeAnalysisMetric, setActiveAnalysisMetric] = useState<"burnRate" | "volume" | "hours">("burnRate");
   const [selectedHighlightType, setSelectedHighlightType] = useState<string>("SEMUA");
@@ -137,50 +139,102 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [isExportingPdf, setIsExportingPdf] = useState(false);
   const [selectedMonthForUpload, setSelectedMonthForUpload] = useState<string | null>(null);
-  const [uploadedMonths, setUploadedMonths] = useState<string[]>([]);
+  const [uploadedMonths, setUploadedMonths] = useState<string[]>(() => getSyncLocalData("yearly_uploaded_months", []));
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
+
+  // Helper to parse MonthlyReportData array into data points
+  const processReportsIntoPoints = (reports: MonthlyReportData[]) => {
+    if (!reports || reports.length === 0) return;
+    const allPts: Array<{
+      bulan: string;
+      typeAlat: string;
+      totalVolume: number;
+      totalHours: number;
+      recordCount: number;
+    }> = [];
+    const cloudMonths: string[] = [];
+
+    reports.forEach((rep) => {
+      if (!cloudMonths.includes(rep.bulan)) {
+        cloudMonths.push(rep.bulan);
+      }
+      if (rep.typeSummaries && rep.typeSummaries.length > 0) {
+        rep.typeSummaries.forEach((ts) => {
+          allPts.push({
+            bulan: rep.bulan,
+            typeAlat: ts.typeAlat,
+            totalVolume: ts.totalVolume,
+            totalHours: ts.totalHours,
+            recordCount: ts.recordCount
+          });
+        });
+      }
+    });
+
+    if (allPts.length > 0) {
+      setDataPoints(allPts);
+      setUploadedMonths(cloudMonths);
+      saveLocalData("yearly_data_points", allPts);
+      saveLocalData("yearly_uploaded_months", cloudMonths);
+    }
+  };
+
+  // Manual cloud refresh
+  const handleManualCloudRefresh = async () => {
+    setIsSyncingCloud(true);
+    try {
+      const reports = await fetchAllMonthlyReports();
+      setIsSyncingCloud(false);
+      setIsCloudConnected(true);
+      if (reports && reports.length > 0) {
+        processReportsIntoPoints(reports);
+        setFeedback({
+          type: "success",
+          message: `Berhasil menyinkronkan ${reports.length} bulan data dari Cloud Firestore (fuel-wbs)!`
+        });
+      } else {
+        setFeedback({
+          type: "success",
+          message: "Koneksi Cloud Firestore aktif. Belum ada dokumen laporan bulanan yang tersimpan."
+        });
+      }
+    } catch (err: any) {
+      setIsSyncingCloud(false);
+      setIsCloudConnected(false);
+      setFeedback({
+        type: "error",
+        message: `Gagal menyinkronkan dari Firestore: ${err.message || "Periksa koneksi internet."}`
+      });
+    }
+  };
 
   // Subscribe to Firebase Firestore real-time updates for uploaded monthly data
   useEffect(() => {
     testConnection();
 
     setIsSyncingCloud(true);
+
+    // Initial direct fetch
+    fetchAllMonthlyReports()
+      .then((reports) => {
+        setIsSyncingCloud(false);
+        setIsCloudConnected(true);
+        if (reports && reports.length > 0) {
+          processReportsIntoPoints(reports);
+        }
+      })
+      .catch((err) => {
+        console.warn("Direct fetch monthly reports note:", err);
+      });
+
+    // Real-time listener
     const unsubscribe = subscribeToMonthlyReports(
       (reports: MonthlyReportData[]) => {
         setIsSyncingCloud(false);
         setIsCloudConnected(true);
         if (reports && reports.length > 0) {
-          const allPts: Array<{
-            bulan: string;
-            typeAlat: string;
-            totalVolume: number;
-            totalHours: number;
-            recordCount: number;
-          }> = [];
-          const cloudMonths: string[] = [];
-
-          reports.forEach((rep) => {
-            if (!cloudMonths.includes(rep.bulan)) {
-              cloudMonths.push(rep.bulan);
-            }
-            if (rep.typeSummaries && rep.typeSummaries.length > 0) {
-              rep.typeSummaries.forEach((ts) => {
-                allPts.push({
-                  bulan: rep.bulan,
-                  typeAlat: ts.typeAlat,
-                  totalVolume: ts.totalVolume,
-                  totalHours: ts.totalHours,
-                  recordCount: ts.recordCount
-                });
-              });
-            }
-          });
-
-          if (allPts.length > 0) {
-            setDataPoints(allPts);
-            setUploadedMonths(cloudMonths);
-          }
+          processReportsIntoPoints(reports);
         }
       },
       (err) => {
@@ -201,6 +255,8 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
     setSelectedHighlightType("SEMUA");
     setStartEvalMonth("Januari");
     setEndEvalMonth("Desember");
+    removeLocalData("yearly_data_points");
+    removeLocalData("yearly_uploaded_months");
     
     // Remove all documents from Firestore
     for (const mName of monthsToDelete) {
@@ -219,8 +275,12 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
 
   // Delete data for a specific single month from local state and Firebase
   const handleClearMonthData = async (monthName: string) => {
-    setDataPoints(prev => prev.filter(d => d.bulan !== monthName));
-    setUploadedMonths(prev => prev.filter(m => m !== monthName));
+    const nextPts = dataPoints.filter(d => d.bulan !== monthName);
+    const nextMonths = uploadedMonths.filter(m => m !== monthName);
+    setDataPoints(nextPts);
+    setUploadedMonths(nextMonths);
+    saveLocalData("yearly_data_points", nextPts);
+    saveLocalData("yearly_uploaded_months", nextMonths);
     
     try {
       await deleteMonthlyReport(`2026_${monthName}`);
@@ -846,25 +906,36 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           }
         }
 
+        let nextPts: typeof dataPoints = [];
+        let nextMonths: string[] = [];
+
         if (selectedMonthForUpload) {
-          setDataPoints((prev) => {
-            const clean = prev.filter(d => d.bulan !== selectedMonthForUpload);
-            return aggregatePts([...clean, ...aggregatedParsed]);
-          });
-          setUploadedMonths((prev) => {
-            if (!prev.includes(selectedMonthForUpload)) {
-              return [...prev, selectedMonthForUpload];
-            }
-            return prev;
-          });
+          const clean = dataPoints.filter(d => d.bulan !== selectedMonthForUpload);
+          nextPts = aggregatePts([...clean, ...aggregatedParsed]);
+          nextMonths = uploadedMonths.includes(selectedMonthForUpload)
+            ? uploadedMonths
+            : [...uploadedMonths, selectedMonthForUpload];
+          
+          setDataPoints(nextPts);
+          setUploadedMonths(nextMonths);
+          saveLocalData("yearly_data_points", nextPts);
+          saveLocalData("yearly_uploaded_months", nextMonths);
+
           setFeedback({
             type: "success",
             message: `Sukses mengunggah & menyimpan data bulan ${selectedMonthForUpload} ke Cloud Firebase (fuel-wbs)! Terdeteksi ${aggregatedParsed.length} jenis alat berat.`
           });
         } else {
-          setDataPoints(aggregatedParsed);
           const parsedMonths = Array.from(new Set(aggregatedParsed.map(e => e.bulan)));
-          setUploadedMonths(parsedMonths);
+          const clean = dataPoints.filter(d => !parsedMonths.includes(d.bulan));
+          nextPts = aggregatePts([...clean, ...aggregatedParsed]);
+          nextMonths = Array.from(new Set([...uploadedMonths, ...parsedMonths]));
+
+          setDataPoints(nextPts);
+          setUploadedMonths(nextMonths);
+          saveLocalData("yearly_data_points", nextPts);
+          saveLocalData("yearly_uploaded_months", nextMonths);
+
           setFeedback({
             type: "success",
             message: `Sukses menganalisa & menyimpan ${sheetsCountParsed} sheet data bulanan ke Cloud Firebase! Melacak ${aggregatedParsed.length} kategori tipe alat.`
@@ -995,6 +1066,16 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              onClick={handleManualCloudRefresh}
+              disabled={isSyncingCloud}
+              className="text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-slate-700"
+              title="Tarik & sinkronkan data bulanan terbaru dari Cloud Firestore"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isSyncingCloud ? 'animate-spin' : ''}`} />
+              <span>{isSyncingCloud ? "Sinkronisasi..." : "Sync Cloud"}</span>
+            </button>
+
             <button
               onClick={exportToPdf}
               disabled={isExportingPdf}

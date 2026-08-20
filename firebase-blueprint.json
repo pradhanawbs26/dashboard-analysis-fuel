@@ -32,6 +32,10 @@
       "schema": "MonthlyReport",
       "description": "Collection of uploaded monthly fuel consumption datasets and yearly analytics summaries."
     },
+    "/active_dataset/{datasetId}": {
+      "schema": "ActiveDataset",
+      "description": "Active fuel dataset for dashboard processing and real-time synchronization."
+    },
     "/test/{testId}": {
       "schema": "TestConnection",
       "description": "Collection for connectivity testing."

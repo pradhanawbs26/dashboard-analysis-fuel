@@ -30,20 +30,23 @@ service cloud.firestore {
 
     // Monthly fuel reports collection
     match /monthly_reports/{reportId} {
-      allow read: if isValidId(reportId);
-      allow create, update: if isValidId(reportId) && isValidMonthlyReport(incoming());
+      allow get: if isValidId(reportId);
+      allow list: if true;
+      allow create, update: if isValidId(reportId);
       allow delete: if isValidId(reportId);
     }
 
     // Active dataset (dashboard master fuel data)
     match /active_dataset/{datasetId} {
-      allow read: if isValidId(datasetId);
+      allow get: if isValidId(datasetId);
+      allow list: if true;
       allow create, update: if isValidId(datasetId);
       allow delete: if isValidId(datasetId);
 
       // Batches of raw records
       match /batches/{batchId} {
-        allow read: if isValidId(batchId);
+        allow get: if isValidId(batchId);
+        allow list: if true;
         allow create, update: if isValidId(batchId);
         allow delete: if isValidId(batchId);
       }
