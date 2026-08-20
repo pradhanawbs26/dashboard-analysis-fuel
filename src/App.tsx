@@ -34,8 +34,14 @@ import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
 import YearlyReview from "./components/YearlyReview";
-import { saveMonthlyReportToFirestore } from "./lib/firebase";
-import { saveLocalData, getLocalData, clearAllLocalData } from "./lib/storage";
+import { 
+  saveMonthlyReportToFirestore, 
+  saveActiveDatasetToFirestore, 
+  fetchActiveDatasetFromFirestore, 
+  subscribeToActiveDataset, 
+  deleteActiveDatasetFromFirestore 
+} from "./lib/firebase";
+import { saveLocalData, getLocalData, getSyncLocalData, clearAllLocalData } from "./lib/storage";
 import { MonthlyReportData } from "./types";
 import { 
   initAuth, 
@@ -60,11 +66,15 @@ const INITIAL_PLANS: Record<string, { idAlat: string; typeAlat: string; planFuel
 };
 
 export default function App() {
-  // Core fuel dataset state
-  const [records, setRecords] = useState<FuelRecord[]>([]);
+  // Core fuel dataset state (initialized immediately from localStorage with INITIAL_FUEL_DATA fallback)
+  const [records, setRecords] = useState<FuelRecord[]>(() => {
+    return getSyncLocalData<FuelRecord[]>("fuel_records", INITIAL_FUEL_DATA);
+  });
 
   // Plans from "List & FC" sheet (Column A: nomor unit, Column B: type alat, Column D: plan Fuel Burn)
-  const [plans, setPlans] = useState<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>({});
+  const [plans, setPlans] = useState<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>(() => {
+    return getSyncLocalData<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>("fuel_plans", INITIAL_PLANS);
+  });
 
   // States for processing Excel/CSV files directly
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -78,13 +88,22 @@ export default function App() {
   const [selectedLogSheet, setSelectedLogSheet] = useState<string>("");
   const [hasPlanSheetPresent, setHasPlanSheetPresent] = useState<boolean>(false);
 
-  // Filter States
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  // Filter States with initial storage restoration
+  const [startDate, setStartDate] = useState<string>(() => {
+    const meta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", { startDate: "2026-04-01", endDate: "2026-04-30" });
+    return meta?.startDate || "2026-04-01";
+  });
+  const [endDate, setEndDate] = useState<string>(() => {
+    const meta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", { startDate: "2026-04-01", endDate: "2026-04-30" });
+    return meta?.endDate || "2026-04-30";
+  });
   const [selectedTypeFilter, setSelectedTypeFilter] = useState("SEMUA");
   const [selectedStorageFilter, setSelectedStorageFilter] = useState("SEMUA");
   const [viewingAnomaliesPage, setViewingAnomaliesPage] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "yearly">("dashboard");
+  const [activeTab, setActiveTab] = useState<"dashboard" | "yearly">(() => {
+    const meta = getSyncLocalData<{ activeTab?: "dashboard" | "yearly" }>("fuel_meta", { activeTab: "dashboard" });
+    return meta?.activeTab || "dashboard";
+  });
 
   // File Input and Dialog Reference
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -99,6 +118,16 @@ export default function App() {
   const [spreadsheetMetadata, setSpreadsheetMetadata] = useState<{ title: string; sheets: string[] } | null>(null);
   const [sheetsSelectedLogTab, setSheetsSelectedLogTab] = useState("");
   const [sheetsSelectedPlanTab, setSheetsSelectedPlanTab] = useState("");
+
+  // Firestore Active Dataset Sync Status
+  const [firestoreSyncStatus, setFirestoreSyncStatus] = useState<{
+    isSynced: boolean;
+    isLoading: boolean;
+    lastUpdated?: string;
+    recordCount?: number;
+    fileName?: string;
+    uploadedBy?: string;
+  }>({ isSynced: false, isLoading: true });
 
   // Initialize Google Auth
   useEffect(() => {
@@ -115,34 +144,65 @@ export default function App() {
     return () => unsubscribe();
   }, []);
 
-  // Restore saved session records automatically on page refresh
+  // Real-time Firestore Active Dataset synchronization & automatic restoration
   useEffect(() => {
-    const restoreSession = async () => {
-      try {
-        const savedRecords = await getLocalData<FuelRecord[]>("fuel_records");
-        const savedPlans = await getLocalData<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>("fuel_plans");
-        const savedMeta = await getLocalData<{ startDate?: string; endDate?: string; fileName?: string; activeTab?: "dashboard" | "yearly" }>("fuel_meta");
+    let isInitialLoad = true;
+    const unsubscribe = subscribeToActiveDataset(
+      (dataset) => {
+        if (dataset && dataset.records && dataset.records.length > 0) {
+          setRecords(dataset.records);
+          if (dataset.plans && Object.keys(dataset.plans).length > 0) {
+            setPlans(dataset.plans);
+          }
+          if (dataset.startDate) setStartDate(dataset.startDate);
+          if (dataset.endDate) setEndDate(dataset.endDate);
 
-        if (savedRecords && savedRecords.length > 0) {
-          setRecords(savedRecords);
-          if (savedPlans && Object.keys(savedPlans).length > 0) {
-            setPlans(savedPlans);
+          setFirestoreSyncStatus({
+            isSynced: true,
+            isLoading: false,
+            lastUpdated: dataset.uploadedAt,
+            recordCount: dataset.records.length,
+            fileName: dataset.fileName,
+            uploadedBy: dataset.uploadedBy
+          });
+
+          // Sync local storage cache for instant offline fallback
+          saveLocalData("fuel_records", dataset.records);
+          saveLocalData("fuel_plans", dataset.plans);
+          saveLocalData("fuel_meta", {
+            startDate: dataset.startDate,
+            endDate: dataset.endDate,
+            fileName: dataset.fileName,
+            activeTab: "dashboard"
+          });
+
+          if (isInitialLoad) {
+            setFileFeedback({
+              type: "success",
+              message: `Terhubung ke Firebase Firestore: Memuat dataset aktif "${dataset.fileName}" (${dataset.records.length} baris data diesel).`
+            });
+            isInitialLoad = false;
           }
-          if (savedMeta) {
-            if (savedMeta.startDate) setStartDate(savedMeta.startDate);
-            if (savedMeta.endDate) setEndDate(savedMeta.endDate);
-            if (savedMeta.activeTab) setActiveTab(savedMeta.activeTab);
-          }
-          setFileFeedback({
-            type: "success",
-            message: `Memulihkan sesi aktif (${savedRecords.length} baris data${savedMeta?.fileName ? ` dari "${savedMeta.fileName}"` : ""}) secara otomatis.`
+        } else {
+          // No active dataset on Firestore yet, try loading local session
+          setFirestoreSyncStatus({
+            isSynced: false,
+            isLoading: false
+          });
+          getLocalData<FuelRecord[]>("fuel_records").then((savedRecords) => {
+            if (savedRecords && savedRecords.length > 0) {
+              setRecords(savedRecords);
+            }
           });
         }
-      } catch (err) {
-        console.warn("Restore session note:", err);
+      },
+      (err) => {
+        console.warn("Firestore dataset subscription notice:", err);
+        setFirestoreSyncStatus({ isSynced: false, isLoading: false });
       }
-    };
-    restoreSession();
+    );
+
+    return () => unsubscribe();
   }, []);
 
   const handleGoogleLogin = async () => {
@@ -611,6 +671,16 @@ export default function App() {
           fileName: `Google Sheet: ${logTab}`,
           activeTab: "dashboard"
         });
+
+        // Persist to Cloud Firestore Active Dataset
+        saveActiveDatasetToFirestore({
+          records: parsed,
+          plans: plansExtracted,
+          startDate: sorted[0],
+          endDate: sorted[sorted.length - 1],
+          fileName: `Google Sheet: ${logTab}`,
+          userEmail: googleUser?.email
+        }).catch(fsErr => console.warn("Firestore dataset autosave notice:", fsErr));
       }
     } catch (err: any) {
       console.error(err);
@@ -775,13 +845,14 @@ export default function App() {
 
   const handleResetToSample = () => {
     clearAllLocalData();
+    deleteActiveDatasetFromFirestore().catch(e => console.warn("Firestore delete dataset notice:", e));
     setRecords(INITIAL_FUEL_DATA);
     setPlans(INITIAL_PLANS);
     setStartDate("2026-04-01");
     setEndDate("2026-05-27");
     setSelectedTypeFilter("SEMUA");
     setSelectedStorageFilter("SEMUA");
-    setFileFeedback({ type: "success", message: "Database kembali menggunakan 25 Log data contoh PT. WAHANA BARA SENTOSA." });
+    setFileFeedback({ type: "success", message: "Database kembali menggunakan 25 Log data contoh PT. WAHANA BARA SENTOSA dan mereset active cloud cache." });
   };
 
   // Date Range Quick selection Presets
@@ -900,6 +971,16 @@ export default function App() {
               fileName: file.name,
               activeTab: "dashboard"
             });
+
+            // Save active dataset to Cloud Firestore
+            saveActiveDatasetToFirestore({
+              records: parsed,
+              plans: plans,
+              startDate: sorted[0],
+              endDate: sorted[sorted.length - 1],
+              fileName: file.name,
+              userEmail: googleUser?.email
+            }).catch(fsErr => console.warn("Firestore dataset autosave notice:", fsErr));
           }
         } catch (err: any) {
           setFileFeedback({
@@ -1266,6 +1347,16 @@ export default function App() {
             fileName: file.name,
             activeTab: "dashboard"
           });
+
+          // Save complete raw dataset into Cloud Firestore Active Dataset
+          saveActiveDatasetToFirestore({
+            records: parsed,
+            plans: plansExtracted,
+            startDate: sorted[0],
+            endDate: sorted[sorted.length - 1],
+            fileName: file.name,
+            userEmail: googleUser?.email
+          }).catch(fsErr => console.warn("Firestore raw dataset autosave notice:", fsErr));
         }
 
         // Auto-save summary to Firebase Firestore for cross-module synchronization
@@ -1573,36 +1664,57 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
         
-        {/* Navigation Tabs row below Header */}
-        <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 max-w-md shadow-sm">
-          <button
-            onClick={() => {
-              setActiveTab("dashboard");
-              setViewingAnomaliesPage(false);
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
-              activeTab === "dashboard"
-                ? "bg-[#1E293B] text-white shadow"
-                : "text-slate-600 hover:text-slate-800"
-            }`}
-          >
-            <TrendingUp className="w-4 h-4" />
-            <span>MONTHLY REVIEW</span>
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab("yearly");
-              setViewingAnomaliesPage(false);
-            }}
-            className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
-              activeTab === "yearly"
-                ? "bg-[#1E293B] text-white shadow"
-                : "text-slate-600 hover:text-slate-800"
-            }`}
-          >
-            <Calendar className="w-4 h-4" />
-            <span>YEARLY REVIEW</span>
-          </button>
+        {/* Navigation Tabs row below Header with Firestore Sync Badge */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 w-full sm:w-auto max-w-md shadow-sm">
+            <button
+              onClick={() => {
+                setActiveTab("dashboard");
+                setViewingAnomaliesPage(false);
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                activeTab === "dashboard"
+                  ? "bg-[#1E293B] text-white shadow"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <TrendingUp className="w-4 h-4" />
+              <span>MONTHLY REVIEW</span>
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab("yearly");
+                setViewingAnomaliesPage(false);
+              }}
+              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                activeTab === "yearly"
+                  ? "bg-[#1E293B] text-white shadow"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <Calendar className="w-4 h-4" />
+              <span>YEARLY REVIEW</span>
+            </button>
+          </div>
+
+          {/* Firestore Connection & Realtime Sync Status Badge */}
+          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200 shadow-xs text-xs font-medium text-slate-700">
+            <span className="relative flex h-2.5 w-2.5">
+              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${firestoreSyncStatus.isSynced ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
+              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${firestoreSyncStatus.isSynced ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
+            </span>
+            <div className="flex items-center gap-1.5">
+              <span className="font-bold text-slate-800">
+                {firestoreSyncStatus.isSynced ? "Cloud Firestore (fuel-wbs)" : "Local Storage Mode"}
+              </span>
+              <span className="text-slate-400">•</span>
+              <span className="text-slate-500 text-[11px]">
+                {firestoreSyncStatus.isSynced 
+                  ? `${records.length} Baris Data Terkoneksi Realtime` 
+                  : `${records.length} Baris Data Tersimpan`}
+              </span>
+            </div>
+          </div>
         </div>
 
         {activeTab === "yearly" ? (

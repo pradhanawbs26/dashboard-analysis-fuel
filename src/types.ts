@@ -63,3 +63,17 @@ export interface MonthlyReportData {
   records?: FuelRecord[];
 }
 
+export interface ActiveDatasetData {
+  id: string; // e.g. "current"
+  fileName: string;
+  startDate: string;
+  endDate: string;
+  recordCount: number;
+  totalVolume: number;
+  totalHours: number;
+  uploadedAt: string;
+  uploadedBy?: string;
+  plans: Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>;
+  batchesCount: number;
+}
+

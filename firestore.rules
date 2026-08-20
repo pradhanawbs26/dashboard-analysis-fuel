@@ -35,6 +35,20 @@ service cloud.firestore {
       allow delete: if isValidId(reportId);
     }
 
+    // Active dataset (dashboard master fuel data)
+    match /active_dataset/{datasetId} {
+      allow read: if isValidId(datasetId);
+      allow create, update: if isValidId(datasetId);
+      allow delete: if isValidId(datasetId);
+
+      // Batches of raw records
+      match /batches/{batchId} {
+        allow read: if isValidId(batchId);
+        allow create, update: if isValidId(batchId);
+        allow delete: if isValidId(batchId);
+      }
+    }
+
     // Connection testing
     match /test/{testId} {
       allow read, write: if isValidId(testId);
