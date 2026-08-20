@@ -1,0 +1,43 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global Safety Net: Default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Helper functions
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function isValidMonthlyReport(data) {
+      return data.keys().hasAll(['id', 'bulan', 'monthIndex', 'year', 'totalVolume', 'totalHours', 'recordCount', 'uploadedAt'])
+        && data.id is string && data.id.size() <= 128
+        && data.bulan is string && data.bulan.size() <= 50
+        && data.monthIndex is number && data.monthIndex >= 0 && data.monthIndex <= 11
+        && data.year is number && data.year >= 2000 && data.year <= 2100
+        && data.totalVolume is number && data.totalVolume >= 0
+        && data.totalHours is number && data.totalHours >= 0
+        && data.recordCount is number && data.recordCount >= 0
+        && data.uploadedAt is string && data.uploadedAt.size() <= 64;
+    }
+
+    // Monthly fuel reports collection
+    match /monthly_reports/{reportId} {
+      allow read: if isValidId(reportId);
+      allow create, update: if isValidId(reportId) && isValidMonthlyReport(incoming());
+      allow delete: if isValidId(reportId);
+    }
+
+    // Connection testing
+    match /test/{testId} {
+      allow read, write: if isValidId(testId);
+    }
+  }
+}

@@ -1,0 +1,6 @@
+{
+  "name": "DASHBOARD FUEL ANALYSIS PT. WBS",
+  "description": "Dashboard Fuel Analysis PT. WAHANA BARA SENTOSA - Aplikasi internal untuk menganalisis data pengisian bahan bakar (Fuel Report), menghitung metrik Fuel Burn secara real-time, mengidentifikasi anomali, dan menyajikan analisis Pareto unit alat berat terboros dari unggahan file Excel/CSV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

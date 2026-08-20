@@ -1,0 +1,40 @@
+{
+  "entities": {
+    "MonthlyReport": {
+      "title": "MonthlyReport",
+      "description": "Monthly fuel report uploaded by operational team containing aggregated and granular fuel consumption data.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Unique identifier for the monthly report, e.g. 2026_Juni" },
+        "bulan": { "type": "string", "description": "Month name in Indonesian, e.g. Januari, Juni" },
+        "monthIndex": { "type": "number", "description": "0-based month index (0 for Jan, 11 for Dec)" },
+        "year": { "type": "number", "description": "Year of the report, e.g. 2026" },
+        "fileName": { "type": "string", "description": "Original file name uploaded" },
+        "uploadedAt": { "type": "string", "description": "ISO timestamp of when the report was saved" },
+        "totalVolume": { "type": "number", "description": "Total fuel volume issued in liters" },
+        "totalHours": { "type": "number", "description": "Total operating hours worked by all units" },
+        "recordCount": { "type": "number", "description": "Number of fueling transactions" },
+        "avgBurnRate": { "type": "number", "description": "Average fuel burn rate (L/hr)" }
+      },
+      "required": ["id", "bulan", "monthIndex", "year", "totalVolume", "totalHours", "recordCount", "uploadedAt"]
+    },
+    "TestConnection": {
+      "title": "TestConnection",
+      "description": "Connection test heartbeat document",
+      "type": "object",
+      "properties": {
+        "status": { "type": "string", "description": "Status string" }
+      }
+    }
+  },
+  "firestore": {
+    "/monthly_reports/{reportId}": {
+      "schema": "MonthlyReport",
+      "description": "Collection of uploaded monthly fuel consumption datasets and yearly analytics summaries."
+    },
+    "/test/{testId}": {
+      "schema": "TestConnection",
+      "description": "Collection for connectivity testing."
+    }
+  }
+}
