@@ -35,6 +35,7 @@ import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
 import YearlyReview from "./components/YearlyReview";
 import { saveMonthlyReportToFirestore } from "./lib/firebase";
+import { saveLocalData, getLocalData, clearAllLocalData } from "./lib/storage";
 import { MonthlyReportData } from "./types";
 import { 
   initAuth, 
@@ -112,6 +113,36 @@ export default function App() {
       }
     );
     return () => unsubscribe();
+  }, []);
+
+  // Restore saved session records automatically on page refresh
+  useEffect(() => {
+    const restoreSession = async () => {
+      try {
+        const savedRecords = await getLocalData<FuelRecord[]>("fuel_records");
+        const savedPlans = await getLocalData<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>("fuel_plans");
+        const savedMeta = await getLocalData<{ startDate?: string; endDate?: string; fileName?: string; activeTab?: "dashboard" | "yearly" }>("fuel_meta");
+
+        if (savedRecords && savedRecords.length > 0) {
+          setRecords(savedRecords);
+          if (savedPlans && Object.keys(savedPlans).length > 0) {
+            setPlans(savedPlans);
+          }
+          if (savedMeta) {
+            if (savedMeta.startDate) setStartDate(savedMeta.startDate);
+            if (savedMeta.endDate) setEndDate(savedMeta.endDate);
+            if (savedMeta.activeTab) setActiveTab(savedMeta.activeTab);
+          }
+          setFileFeedback({
+            type: "success",
+            message: `Memulihkan sesi aktif (${savedRecords.length} baris data${savedMeta?.fileName ? ` dari "${savedMeta.fileName}"` : ""}) secara otomatis.`
+          });
+        }
+      } catch (err) {
+        console.warn("Restore session note:", err);
+      }
+    };
+    restoreSession();
   }, []);
 
   const handleGoogleLogin = async () => {
@@ -571,6 +602,15 @@ export default function App() {
         const sorted = [...validDates].sort();
         setStartDate(sorted[0]);
         setEndDate(sorted[sorted.length - 1]);
+
+        saveLocalData("fuel_records", parsed);
+        saveLocalData("fuel_plans", plansExtracted);
+        saveLocalData("fuel_meta", {
+          startDate: sorted[0],
+          endDate: sorted[sorted.length - 1],
+          fileName: `Google Sheet: ${logTab}`,
+          activeTab: "dashboard"
+        });
       }
     } catch (err: any) {
       console.error(err);
@@ -734,6 +774,7 @@ export default function App() {
   }, [records, referenceDate]);
 
   const handleResetToSample = () => {
+    clearAllLocalData();
     setRecords(INITIAL_FUEL_DATA);
     setPlans(INITIAL_PLANS);
     setStartDate("2026-04-01");
@@ -850,6 +891,15 @@ export default function App() {
             const sorted = [...validDates].sort();
             setStartDate(sorted[0]);
             setEndDate(sorted[sorted.length - 1]);
+
+            saveLocalData("fuel_records", parsed);
+            saveLocalData("fuel_plans", plans);
+            saveLocalData("fuel_meta", {
+              startDate: sorted[0],
+              endDate: sorted[sorted.length - 1],
+              fileName: file.name,
+              activeTab: "dashboard"
+            });
           }
         } catch (err: any) {
           setFileFeedback({
@@ -1207,6 +1257,15 @@ export default function App() {
           const sorted = [...validDates].sort();
           setStartDate(sorted[0]);
           setEndDate(sorted[sorted.length - 1]);
+
+          saveLocalData("fuel_records", parsed);
+          saveLocalData("fuel_plans", plansExtracted);
+          saveLocalData("fuel_meta", {
+            startDate: sorted[0],
+            endDate: sorted[sorted.length - 1],
+            fileName: file.name,
+            activeTab: "dashboard"
+          });
         }
 
         // Auto-save summary to Firebase Firestore for cross-module synchronization
