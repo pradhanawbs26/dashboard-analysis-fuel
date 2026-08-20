@@ -1,12 +1,12 @@
 {
   "projectId": "fuel-wbs",
-  "appId": "1:714022979379:web:16ab129fb82e5902fc6046",
+  "appId": "1:714022979379:web:c5daa47cf7c72fe5fc6046",
   "apiKey": "AIzaSyCmk2sWbyfBMwbsjm001wU4rYAUmL_X9qI",
   "authDomain": "fuel-wbs.firebaseapp.com",
-  "firestoreDatabaseId": "ai-studio-wbsdashboardfuel-34cd80ba-aa2f-4c2c-9a3c-1a3e29329f43",
+  "firestoreDatabaseId": "(default)",
   "storageBucket": "fuel-wbs.firebasestorage.app",
   "messagingSenderId": "714022979379",
-  "measurementId": "",
+  "measurementId": "G-GSECR71D81",
   "oAuthClientId": "714022979379-bk22bbqsnaaksnts79mpd4uuonnvg534.apps.googleusercontent.com",
   "recaptchaSiteKey": ""
 }

@@ -21,7 +21,7 @@ import { MonthlyReportData } from '../types';
 export const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 // Initialize Firestore with configured databaseId (CRITICAL for multi-database or project setup)
-export const db = firebaseConfig.firestoreDatabaseId 
+export const db = (firebaseConfig.firestoreDatabaseId && firebaseConfig.firestoreDatabaseId !== '(default)')
   ? getFirestore(app, firebaseConfig.firestoreDatabaseId)
   : getFirestore(app);
 
