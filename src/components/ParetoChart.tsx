@@ -1,27 +1,32 @@
 import React, { useState, useMemo } from "react";
 import { Fuel, TrendingUp, AlertTriangle, Info, BarChart2 } from "lucide-react";
-import { FuelRecord, ParetoUnitItem } from "../types";
+import { FuelRecord, ParetoUnitItem, EgyPlanMap } from "../types";
+import { resolvePlanForUnit } from "../lib/egyPlanService";
 
 interface ParetoChartProps {
   records: FuelRecord[];
-  selectedType: string;
-  plans?: Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>;
+  selectedEgy?: string;
+  selectedType?: string; // backwards compatibility
+  plans?: Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>;
+  egyPlans?: EgyPlanMap;
 }
 
-export default function ParetoChart({ records, selectedType, plans = {} }: ParetoChartProps) {
+export default function ParetoChart({ records, selectedEgy, selectedType = "SEMUA", plans = {}, egyPlans = {} }: ParetoChartProps) {
   const [hoveredUnit, setHoveredUnit] = useState<string | null>(null);
+  const activeEgyFilter = selectedEgy || selectedType;
 
-  // Group records by Unit ID (Id Alat) and filter by selected Equipment Type if chosen
+  // Group records by Unit ID (Id Alat) and filter by selected Egy Alat if chosen
   const paretoData: ParetoUnitItem[] = useMemo(() => {
-    // 1. Filter records of valid run hours
+    // 1. Filter records of valid run hours (strictly exclude rental units with HM <= 0)
     const filtered = records.filter(r => {
-      const typeMatch = selectedType === "SEMUA" || r.typeAlat === selectedType;
-      return typeMatch && !r.isAnomaly;
+      const egyMatch = !activeEgyFilter || activeEgyFilter === "SEMUA" || r.egy === activeEgyFilter || r.typeAlat === activeEgyFilter;
+      return egyMatch && !r.isAnomaly && r.selisihHm > 0;
     });
 
     // 2. Aggregate counts, hours, volumes per unit ID
     const aggregates: { [key: string]: { 
       idAlat: string; 
+      egy: string;
       typeAlat: string;
       totalVolume: number; 
       totalHours: number; 
@@ -32,6 +37,7 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
       if (!aggregates[r.idAlat]) {
         aggregates[r.idAlat] = {
           idAlat: r.idAlat,
+          egy: r.egy || (plans && plans[r.idAlat.toUpperCase()]?.egy) || r.typeAlat,
           typeAlat: r.typeAlat,
           totalVolume: 0,
           totalHours: 0,
@@ -43,29 +49,31 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
       aggregates[r.idAlat].recordsCount += 1;
     });
 
-    // 3. Convert to list and calculate Average Fuel Burn
-    const unitList = Object.values(aggregates).map(item => {
-      const averageFuelBurn = item.totalHours > 0 
-        ? Number((item.totalVolume / item.totalHours).toFixed(2)) 
-        : 0;
+    // 3. Convert to list and calculate Average Fuel Burn (only operational units)
+    const unitList = Object.values(aggregates)
+      .filter(item => item.totalHours > 0)
+      .map(item => {
+        const averageFuelBurn = item.totalHours > 0 
+          ? Number((item.totalVolume / item.totalHours).toFixed(2)) 
+          : 0;
 
-      return {
-        idAlat: item.idAlat,
-        typeAlat: item.typeAlat,
-        totalVolume: Number(item.totalVolume.toFixed(1)),
-        averageFuelBurn,
-        runningHours: Number(item.totalHours.toFixed(1)),
-        recordCount: item.recordsCount,
-        cumulativePercent: 0,
-        isAnomaly: false
-      };
-    });
+        return {
+          idAlat: item.idAlat,
+          egy: item.egy,
+          typeAlat: item.typeAlat,
+          totalVolume: Number(item.totalVolume.toFixed(1)),
+          averageFuelBurn,
+          runningHours: Number(item.totalHours.toFixed(1)),
+          recordCount: item.recordsCount,
+          cumulativePercent: 0,
+          isAnomaly: false
+        };
+      });
 
     // 4. Sort from Highest Fuel Burn Rate to Lowest
     unitList.sort((a, b) => b.averageFuelBurn - a.averageFuelBurn);
 
     // 5. Calculate cumulative percentages based on overall fuel burn rates or total volume
-    // Let's compute Pareto based on Total Volume consumed (which is standard for resource usage)
     const sumAllVolumes = unitList.reduce((acc, u) => acc + u.totalVolume, 0);
     
     let runningVolumeSum = 0;
@@ -82,7 +90,7 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
     });
 
     return finalData;
-  }, [records, selectedType]);
+  }, [records, activeEgyFilter, plans, egyPlans]);
 
   // Determine standard threshold for warnings (e.g., averages above 15% of the average of the selected type)
   const categoryAverage = useMemo(() => {
@@ -103,11 +111,11 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
           <div className="flex items-center gap-2">
             <BarChart2 className="w-5 h-5 text-slate-700" />
             <h3 className="text-lg font-bold text-slate-800">
-              Grafik Fuel Burn per Unit
+              Grafik Fuel Burn per Unit (Parameter Utama: Egy Alat)
             </h3>
           </div>
           <p className="text-xs text-slate-500 mt-1">
-            Menampilkan ID Alat diurutkan dari pemakaian tertinggi (kiri) ke terendah (kanan). {selectedType !== "SEMUA" && `Kategori khusus: ${selectedType}`}
+            Menampilkan ID Alat diurutkan dari pemakaian tertinggi (kiri) ke terendah (kanan). {activeEgyFilter !== "SEMUA" && `Egy khusus: ${activeEgyFilter}`}
           </p>
         </div>
 
@@ -195,16 +203,20 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
 
                         {/* Detailed Full Hover Cards */}
                         {hoveredUnit === unit.idAlat && (() => {
-                          const plItem = plans && plans[unit.idAlat.toUpperCase()];
-                          const plValue = plItem ? plItem.planFuelBurn : 0;
+                          const resolved = resolvePlanForUnit(unit.idAlat, unit.egy, unit.typeAlat, plans, egyPlans);
+                          const plValue = resolved.planFuelBurn;
                           const devia = plValue > 0 ? unit.averageFuelBurn - plValue : 0;
                           return (
-                            <div className="absolute bottom-full mb-10 -left-12 sm:left-auto sm:right-auto bg-slate-900 border border-slate-750 p-3 rounded-lg shadow-2xl text-white text-xs w-48 z-40 space-y-1.5 pointer-events-none">
-                              <div className="flex items-center justify-between border-b border-slate-700/60 pb-1">
+                            <div className="absolute bottom-full mb-10 -left-12 sm:left-auto sm:right-auto bg-slate-900 border border-slate-750 p-3 rounded-lg shadow-2xl text-white text-xs w-52 z-40 space-y-1.5 pointer-events-none">
+                              <div className="flex items-center justify-between border-b border-slate-700/60 pb-1 gap-1">
                                 <span className="font-mono font-bold text-blue-200">{unit.idAlat}</span>
-                                <span className="text-[9px] bg-slate-800 text-slate-300 font-mono px-1 py-0.2 rounded truncate max-w-[90px]">{unit.typeAlat}</span>
+                                <span className="text-[9px] bg-emerald-900/80 text-emerald-300 font-mono px-1.5 py-0.5 rounded truncate font-bold">{unit.egy}</span>
                               </div>
                               <div className="space-y-1">
+                                <div className="flex justify-between">
+                                  <span className="text-slate-400">Parameter Egy:</span>
+                                  <span className="font-bold text-emerald-300 font-mono text-[11px] truncate max-w-[110px]">{unit.egy}</span>
+                                </div>
                                 <div className="flex justify-between">
                                   <span className="text-slate-400">Avg Fuel Burn:</span>
                                   <span className="font-bold text-amber-300 font-mono">{unit.averageFuelBurn} L/Jam</span>
@@ -266,7 +278,7 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="py-2.5 px-3 text-slate-500 font-bold">Peringkat</th>
                     <th className="py-2.5 px-3 text-slate-500 font-bold">Nomor Unit (ID Alat)</th>
-                    <th className="py-2.5 px-3 text-slate-500 font-bold">Type Alat</th>
+                    <th className="py-2.5 px-3 text-slate-500 font-bold">Egy Alat (Kolom C)</th>
                     <th className="py-2.5 px-3 text-slate-500 font-bold text-right font-mono">Fuel Burn (Avg)</th>
                     <th className="py-2.5 px-3 text-slate-500 font-bold text-right font-mono pr-4">Target Plan</th>
                     <th className="py-2.5 px-3 text-slate-500 font-bold text-right font-mono pr-4">Deviasi Plan</th>
@@ -280,8 +292,8 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
                     const isOutlier = unit.averageFuelBurn > categoryAverage * 1.35;
                     const ranksInTop80 = unit.cumulativePercent <= 80 || (index > 0 && paretoData[index - 1].cumulativePercent <= 80);
                     
-                    const planItem = plans && plans[unit.idAlat.toUpperCase()];
-                    const planValue = planItem ? planItem.planFuelBurn : 0;
+                    const resolved = resolvePlanForUnit(unit.idAlat, unit.egy, unit.typeAlat, plans, egyPlans);
+                    const planValue = resolved.planFuelBurn;
                     const devia = planValue > 0 ? unit.averageFuelBurn - planValue : 0;
                     const isOverP = devia > 0.01;
 
@@ -297,7 +309,11 @@ export default function ParetoChart({ records, selectedType, plans = {} }: Paret
                           </span>
                         </td>
                         <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{unit.idAlat}</td>
-                        <td className="py-2.5 px-3 text-slate-600">{unit.typeAlat}</td>
+                        <td className="py-2.5 px-3">
+                          <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60 font-mono text-[11px]">
+                            {unit.egy}
+                          </span>
+                        </td>
                         <td className="py-2.5 px-3 text-right font-mono font-semibold text-slate-800">
                           <span className={isOverP || isOutlier ? "text-rose-600 font-bold" : "text-blue-700"}>
                             {unit.averageFuelBurn.toFixed(2)} <span className="text-[10px] text-slate-400">L/Jam</span>

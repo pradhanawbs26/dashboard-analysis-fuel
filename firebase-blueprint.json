@@ -25,6 +25,17 @@
       "properties": {
         "status": { "type": "string", "description": "Status string" }
       }
+    },
+    "PlanSettings": {
+      "title": "PlanSettings",
+      "description": "User configured Target Fuel Burn Plans per Egy and master benchmarks.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "Setting ID, e.g. egy_plans" },
+        "updatedAt": { "type": "string", "description": "Timestamp of last plan update" },
+        "plans": { "type": "object", "description": "Map of Egy names to target plan fuel burn rates (L/hr)" }
+      },
+      "required": ["id", "updatedAt", "plans"]
     }
   },
   "firestore": {
@@ -35,6 +46,10 @@
     "/active_dataset/{datasetId}": {
       "schema": "ActiveDataset",
       "description": "Active fuel dataset for dashboard processing and real-time synchronization."
+    },
+    "/plan_settings/{settingId}": {
+      "schema": "PlanSettings",
+      "description": "Collection of user-configured Target Fuel Burn Plans per Egy."
     },
     "/test/{testId}": {
       "schema": "TestConnection",

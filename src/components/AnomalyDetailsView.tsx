@@ -19,7 +19,8 @@ interface AnomalyDetailsViewProps {
   onBack: () => void;
   startDate: string;
   endDate: string;
-  selectedType: string;
+  selectedEgy?: string;
+  selectedType?: string;
   selectedStorage: string;
   isFiltered?: boolean;
   onClearFilters?: () => void;
@@ -32,12 +33,14 @@ export default function AnomalyDetailsView({
   onBack,
   startDate,
   endDate,
+  selectedEgy,
   selectedType,
   selectedStorage,
   isFiltered = false,
   onClearFilters,
   totalGlobalAnomaliesCount = 0
 }: AnomalyDetailsViewProps) {
+  const activeFilterLabel = selectedEgy || selectedType || "SEMUA";
 
   // Statistics for anomalies
   const totalAnomalousBbm = useMemo(() => {
@@ -136,7 +139,7 @@ export default function AnomalyDetailsView({
           </div>
           <div className="flex items-center gap-2 flex-wrap">
             <div className="text-[11px] text-slate-500 bg-slate-100 font-bold px-2.5 py-1 rounded border border-slate-200">
-              Kategori: {selectedType} • Lokasi Pengisian: {selectedStorage}
+              Egy Alat: {activeFilterLabel} • Lokasi Pengisian: {selectedStorage}
             </div>
             {isFiltered && onClearFilters && (
               <button
@@ -153,7 +156,7 @@ export default function AnomalyDetailsView({
           <div className="flex flex-col items-center justify-center py-16 text-slate-400 bg-slate-50 rounded-lg border border-slate-150 p-4 text-center">
             <Sparkles className="w-8 h-8 opacity-60 mb-2 text-emerald-500 animate-bounce" />
             <p className="text-sm font-bold text-slate-700">Luar Biasa, Tidak Ada Anomali Terdeteksi!</p>
-            <p className="text-xs text-slate-400 mt-1 max-w-md">Data pada filter Kategori "{selectedType}" dan Lokasi "{selectedStorage}" ini 100% konsisten.</p>
+            <p className="text-xs text-slate-400 mt-1 max-w-md">Data pada filter Egy "{activeFilterLabel}" dan Lokasi "{selectedStorage}" ini 100% konsisten.</p>
             {isFiltered && onClearFilters && (
               <button
                 onClick={onClearFilters}
@@ -170,7 +173,7 @@ export default function AnomalyDetailsView({
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <th className="py-3 px-3 text-slate-500 font-bold w-12 text-center">No</th>
                   <th className="py-3 px-3 text-slate-500 font-bold">Nomor Unit / ID</th>
-                  <th className="py-3 px-3 text-slate-500 font-bold">Type Unit</th>
+                  <th className="py-3 px-3 text-slate-500 font-bold">Egy Alat (Kolom C)</th>
                   <th className="py-3 px-3 text-slate-500 font-bold">Tanggal</th>
                   <th className="py-3 px-3 text-slate-500 font-bold">Lokasi Pengisian</th>
                   <th className="py-3 px-3 text-slate-500 font-bold text-right font-mono">HM Awal</th>
@@ -188,7 +191,11 @@ export default function AnomalyDetailsView({
                     <tr key={r.id || index} className="hover:bg-rose-50/15 transition-colors">
                       <td className="py-3 px-3 text-center font-bold text-slate-400">{index + 1}</td>
                       <td className="py-3 px-3 font-mono font-bold text-slate-800">{r.idAlat}</td>
-                      <td className="py-3 px-3 text-slate-600">{r.typeAlat}</td>
+                      <td className="py-3 px-3">
+                        <span className="font-semibold text-emerald-800 bg-emerald-50 px-2 py-0.5 rounded border border-emerald-200/60 font-mono text-[11px]">
+                          {r.egy}
+                        </span>
+                      </td>
                       <td className="py-3 px-3 text-slate-600 font-mono whitespace-nowrap">{r.tanggal}</td>
                       <td className="py-3 px-3">
                         <span className="inline-block bg-slate-100 text-slate-700 text-[10px] font-bold px-2 py-0.5 rounded">

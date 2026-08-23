@@ -23,17 +23,34 @@ import {
   Globe,
   RefreshCw,
   FileText,
-  Check
+  Check,
+  SlidersHorizontal,
+  Cloud,
+  CloudOff
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
-import { FuelRecord } from "./types";
-import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD } from "./data/sampleData";
+import { FuelRecord, EgyPlanMap, UnitRegistryMap } from "./types";
+import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, deriveEquipmentType } from "./data/sampleData";
 import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
 import YearlyReview from "./components/YearlyReview";
+import EgyPlanManagerModal from "./components/EgyPlanManagerModal";
+import PlanVsActualAssessment from "./components/PlanVsActualAssessment";
+import PlanFuelBurnPage from "./components/PlanFuelBurnPage";
+import { 
+  getStoredEgyPlans, 
+  saveStoredEgyPlans, 
+  subscribeToEgyPlans, 
+  getStoredUnitRegistry,
+  saveStoredUnitRegistry,
+  saveUnitRegistryToFirestore,
+  subscribeToUnitRegistry,
+  resolvePlanForUnit, 
+  DEFAULT_EGY_PLANS 
+} from "./lib/egyPlanService";
 import { 
   saveMonthlyReportToFirestore, 
   saveActiveDatasetToFirestore, 
@@ -52,17 +69,26 @@ import {
   fetchSheetValues 
 } from "./lib/googleSheets";
 
-const INITIAL_PLANS: Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }> = {
-  "EXC-PC200-01": { idAlat: "EXC-PC200-01", typeAlat: "Excavator PC200", planFuelBurn: 22.0 },
-  "EXC-PC200-02": { idAlat: "EXC-PC200-02", typeAlat: "Excavator PC200", planFuelBurn: 22.0 },
-  "EXC-PC200-03": { idAlat: "EXC-PC200-03", typeAlat: "Excavator PC200", planFuelBurn: 22.0 },
-  "DT-HD785-05": { idAlat: "DT-HD785-05", typeAlat: "Dump Truck HD785", planFuelBurn: 72.0 },
-  "DT-HD785-06": { idAlat: "DT-HD785-06", typeAlat: "Dump Truck HD785", planFuelBurn: 72.0 },
-  "DT-HD785-07": { idAlat: "DT-HD785-07", typeAlat: "Dump Truck HD785", planFuelBurn: 72.0 },
-  "BULL-D85-01": { idAlat: "BULL-D85-01", typeAlat: "Bulldozer D85SS", planFuelBurn: 25.0 },
-  "BULL-D85-02": { idAlat: "BULL-D85-02", typeAlat: "Bulldozer D85SS", planFuelBurn: 25.0 },
-  "GRAD-GD511-01": { idAlat: "GRAD-GD511-01", typeAlat: "Motor Grader GD511", planFuelBurn: 17.5 },
-  "LOAD-WA500-02": { idAlat: "LOAD-WA500-02", typeAlat: "Wheel Loader WA500", planFuelBurn: 30.0 },
+const INITIAL_PLANS: Record<string, { idAlat: string; egy: string; typeAlat: string; planFuelBurn: number }> = {
+  "DT23001": { idAlat: "DT23001", egy: "DUMP TRUCK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 7.5 },
+  "DT23005": { idAlat: "DT23005", egy: "DUMP TRUCK", typeAlat: "HINO 500 (FM280JD)", planFuelBurn: 6.5 },
+  "EX23001": { idAlat: "EX23001", egy: "EXCAVATOR", typeAlat: "KOMATSU PC 210", planFuelBurn: 13.0 },
+  "EX23203": { idAlat: "EX23203", egy: "EXCAVATOR", typeAlat: "CAT 320 GC", planFuelBurn: 16.0 },
+  "DZ23001": { idAlat: "DZ23001", egy: "BULLDOZER", typeAlat: "CATERPILAR D8T", planFuelBurn: 28.0 },
+  "TL23002": { idAlat: "TL23002", egy: "TOWER LAMP", typeAlat: "TOWER LAMP", planFuelBurn: 3.0 },
+  "LV23207": { idAlat: "LV23207", egy: "LIGHT VEHICLE", typeAlat: "TOYOTA INNOVA", planFuelBurn: 4.0 },
+  "CT23001": { idAlat: "CT23001", egy: "CRANE TRUCK", typeAlat: "HINO 500 (FM280JD)", planFuelBurn: 6.5 },
+  "FT23001": { idAlat: "FT23001", egy: "FUEL TRUCK", typeAlat: "DUTRO 136 HD", planFuelBurn: 7.0 },
+  "FL23001": { idAlat: "FL23001", egy: "FORKLIFT", typeAlat: "KOMATSU FD150E - 8", planFuelBurn: 6.0 },
+  "WT23102": { idAlat: "WT23102", egy: "WATER TRUCK", typeAlat: "DUTRO 136 HD", planFuelBurn: 6.0 },
+  "RS23003": { idAlat: "RS23003", egy: "REACH STACKER", typeAlat: "KONECRANE 45T", planFuelBurn: 12.5 },
+  "FD23001": { idAlat: "FD23001", egy: "FLAT DECK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 7.0 },
+  "FD23209": { idAlat: "FD23209", egy: "FLAT DECK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 7.0 },
+  "EXC-PC200-01": { idAlat: "EXC-PC200-01", egy: "EXCAVATOR", typeAlat: "KOMATSU PC 210", planFuelBurn: 13.0 },
+  "DT-HD785-05": { idAlat: "DT-HD785-05", egy: "DUMP TRUCK", typeAlat: "HINO 500 (FM280JD)", planFuelBurn: 6.5 },
+  "BULL-D85-01": { idAlat: "BULL-D85-01", egy: "BULLDOZER", typeAlat: "KOMATSU D85SS", planFuelBurn: 25.0 },
+  "GRAD-GD511-01": { idAlat: "GRAD-GD511-01", egy: "MOTOR GRADER", typeAlat: "KOMATSU GD 535", planFuelBurn: 10.0 },
+  "LOAD-WA500-02": { idAlat: "LOAD-WA500-02", egy: "WHEEL LOADER", typeAlat: "KOMATSU WA 500", planFuelBurn: 30.0 },
 };
 
 export default function App() {
@@ -71,10 +97,66 @@ export default function App() {
     return getSyncLocalData<FuelRecord[]>("fuel_records", INITIAL_FUEL_DATA);
   });
 
-  // Plans from "List & FC" sheet (Column A: nomor unit, Column B: type alat, Column D: plan Fuel Burn)
-  const [plans, setPlans] = useState<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>(() => {
-    return getSyncLocalData<Record<string, { idAlat: string; typeAlat: string; planFuelBurn: number }>>("fuel_plans", INITIAL_PLANS);
+  // Plans from "List & FC" sheet (Column A: nomor unit, Column B: type alat, Column C: egy alat, Column D: plan Fuel Burn)
+  const [plans, setPlans] = useState<Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>>(() => {
+    return getSyncLocalData<Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>>("fuel_plans", INITIAL_PLANS);
   });
+
+  // Dynamic benchmark plans by Jenis Egy (EgyPlanMap)
+  const [egyPlans, setEgyPlans] = useState<EgyPlanMap>(() => {
+    return getStoredEgyPlans();
+  });
+  const [isEgyPlanModalOpen, setIsEgyPlanModalOpen] = useState<boolean>(false);
+
+  // Registered operational unit fleet & custom unit-level plans
+  const [unitRegistry, setUnitRegistry] = useState<UnitRegistryMap>(() => {
+    return getStoredUnitRegistry();
+  });
+
+  // Subscribe to real-time updates for egyPlans from Firestore
+  useEffect(() => {
+    const unsub = subscribeToEgyPlans((latest) => {
+      setEgyPlans(latest);
+    });
+    return () => unsub();
+  }, []);
+
+  // Subscribe to real-time updates for unitRegistry from Firestore
+  useEffect(() => {
+    const unsub = subscribeToUnitRegistry((latest) => {
+      setUnitRegistry(latest);
+    });
+    return () => unsub();
+  }, []);
+
+  const handleSaveEgyPlans = async (updated: EgyPlanMap) => {
+    setEgyPlans(updated);
+    await saveStoredEgyPlans(updated);
+    setFileFeedback({
+      type: "success",
+      message: "Target Plan Fuel Burn per Jenis Egy berhasil diperbarui dan disinkronkan ke cloud!"
+    });
+  };
+
+  const handleSaveUnitRegistry = async (updated: UnitRegistryMap) => {
+    setUnitRegistry(updated);
+    saveStoredUnitRegistry(updated);
+    try {
+      await saveUnitRegistryToFirestore(updated);
+    } catch (e) {
+      console.warn("Could not save unit registry to firestore:", e);
+    }
+  };
+
+  // Available unique Egy categories across the current dataset
+  const availableEgys = useMemo(() => {
+    const egys = new Set<string>();
+    records.forEach(r => {
+      const egy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+      if (egy) egys.add(egy);
+    });
+    return Array.from(egys).sort();
+  }, [records]);
 
   // States for processing Excel/CSV files directly
   const [isProcessingFile, setIsProcessingFile] = useState(false);
@@ -97,11 +179,11 @@ export default function App() {
     const meta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", { startDate: "2026-04-01", endDate: "2026-04-30" });
     return meta?.endDate || "2026-04-30";
   });
-  const [selectedTypeFilter, setSelectedTypeFilter] = useState("SEMUA");
+  const [selectedEgyFilter, setSelectedEgyFilter] = useState("SEMUA");
   const [selectedStorageFilter, setSelectedStorageFilter] = useState("SEMUA");
   const [viewingAnomaliesPage, setViewingAnomaliesPage] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "yearly">(() => {
-    const meta = getSyncLocalData<{ activeTab?: "dashboard" | "yearly" }>("fuel_meta", { activeTab: "dashboard" });
+  const [activeTab, setActiveTab] = useState<"dashboard" | "yearly" | "plan">(() => {
+    const meta = getSyncLocalData<{ activeTab?: "dashboard" | "yearly" | "plan" }>("fuel_meta", { activeTab: "dashboard" });
     return meta?.activeTab || "dashboard";
   });
 
@@ -377,18 +459,18 @@ export default function App() {
       const isIssuedSheet = logTab.toLowerCase() === "issued" || logTab.toLowerCase().includes("issue");
       
       let colMap = {
-        tanggal: isIssuedSheet ? 6 : 0,      // Column G (index 6): tanggal
-        storage: isIssuedSheet ? 7 : 1,      // Column H (index 7): storage pengisian fuel
-        idAlat: isIssuedSheet ? 8 : 2,       // Column I (index 8): Unit
-        typeAlat: isIssuedSheet ? 9 : 3,     // Column J (index 9): Kategori unit
-        brandAlat: isIssuedSheet ? 10 : -1,  // Column K (index 10): Type.brand unit
-        hmSebelum: isIssuedSheet ? 11 : 4,   // Column L (index 11): HM pengisian fuel sebelumnya
-        hmSaatIni: isIssuedSheet ? 12 : 5,   // Column M (index 12): HM pengisian fuel pada tanggal itu
-        volumeFuel: isIssuedSheet ? 14 : 6,  // Column O (index 14): jumlah fuel yang diisi
-        operator: isIssuedSheet ? 18 : 7,    // Column S (index 18): nama operator unit
-        fuelman: isIssuedSheet ? 20 : 8,     // Column U (index 20)
-        shift: isIssuedSheet ? 21 : 9,       // Column V (index 21)
-        jam: isIssuedSheet ? 22 : 10         // Column W (index 22)
+        tanggal: 6,                          // Column G (index 6): tanggal
+        storage: 7,                          // Column H (index 7): storage pengisian fuel
+        idAlat: 8,                           // Column I (index 8): Unit / Equipment ID
+        typeAlat: 9,                         // Column J (index 9): Kategori unit
+        brandAlat: 10,                       // Column K (index 10): Type.brand unit
+        hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
+        hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
+        volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi
+        operator: 18,                        // Column S (index 18): nama operator unit
+        fuelman: 20,                         // Column U (index 20)
+        shift: 21,                           // Column V (index 21)
+        jam: 22                              // Column W (index 22)
       };
 
       let detectedHeaderRowIdx = -1;
@@ -644,7 +726,7 @@ export default function App() {
         setPlans(plansExtracted);
       }
       setRecords(parsed);
-      setSelectedTypeFilter("SEMUA");
+      setSelectedEgyFilter("SEMUA");
       setSelectedStorageFilter("SEMUA");
 
       const hasPlansMsg = Object.keys(plansExtracted).length > 0 
@@ -697,10 +779,12 @@ export default function App() {
   };
 
   // Extract unique values for filter dropdowns
-  const uniqueEquipmentTypes = useMemo(() => {
-    const types = new Set<string>();
-    records.forEach(r => types.add(r.typeAlat));
-    return Array.from(types).sort();
+  const uniqueEgys = useMemo(() => {
+    const egys = new Set<string>();
+    records.forEach(r => {
+      if (r.egy) egys.add(r.egy);
+    });
+    return Array.from(egys).sort();
   }, [records]);
 
   const uniqueStorages = useMemo(() => {
@@ -715,28 +799,29 @@ export default function App() {
       // Date filter match
       const dateMatch = (!startDate || r.tanggal >= startDate) && (!endDate || r.tanggal <= endDate);
       
-      // Equipment type filter match
-      const typeMatch = selectedTypeFilter === "SEMUA" || r.typeAlat === selectedTypeFilter;
+      // Egy filter match
+      const egyMatch = selectedEgyFilter === "SEMUA" || r.egy === selectedEgyFilter;
 
       // Storage match
       const storageMatch = selectedStorageFilter === "SEMUA" || r.storage === selectedStorageFilter;
 
-      return dateMatch && typeMatch && storageMatch;
+      return dateMatch && egyMatch && storageMatch;
     });
-  }, [records, startDate, endDate, selectedTypeFilter, selectedStorageFilter]);
+  }, [records, startDate, endDate, selectedEgyFilter, selectedStorageFilter]);
 
-  // Compare actual vs plan (List & FC)
+  // Compare actual vs plan (List & FC and Egy Plans)
   const unitComparisons = useMemo(() => {
     // 1. Group active records by Unit ID
-    // We only use non-anomaly records within the filtered date range and type filters
-    const aggregates: Record<string, { idAlat: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
+    // We only use non-anomaly records within the filtered date range and type filters (strictly exclude rental units with selisihHm <= 0)
+    const aggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
     
     filteredRecords.forEach(r => {
-      if (r.isAnomaly) return;
+      if (r.isAnomaly || r.selisihHm <= 0) return;
       const key = r.idAlat.toUpperCase();
       if (!aggregates[key]) {
         aggregates[key] = {
           idAlat: r.idAlat,
+          egy: r.egy || deriveEgy(r.idAlat, r.typeAlat),
           typeAlat: r.typeAlat,
           totalVolume: 0,
           totalHours: 0,
@@ -748,28 +833,32 @@ export default function App() {
       aggregates[key].recordCount += 1;
     });
 
-    return Object.values(aggregates).map(item => {
-      const avgActual = item.totalHours > 0 ? Number((item.totalVolume / item.totalHours).toFixed(2)) : 0;
-      const planItem = plans[item.idAlat.toUpperCase()];
-      const planValue = planItem ? planItem.planFuelBurn : 0;
-      const deviation = planValue > 0 ? avgActual - planValue : 0;
-      const deviationPct = planValue > 0 ? (deviation / planValue) * 100 : 0;
-      const isOver = deviation > 0.01;
+    return Object.values(aggregates)
+      .filter(item => item.totalHours > 0)
+      .map(item => {
+        const avgActual = item.totalHours > 0 ? Number((item.totalVolume / item.totalHours).toFixed(2)) : 0;
+        const resolved = resolvePlanForUnit(item.idAlat, item.egy, item.typeAlat, plans, egyPlans);
+        const planValue = resolved.planFuelBurn;
+        const deviation = planValue > 0 ? avgActual - planValue : 0;
+        const deviationPct = planValue > 0 ? (deviation / planValue) * 100 : 0;
+        const isOver = deviation > 0.01;
 
-      return {
-        idAlat: item.idAlat,
-        typeAlat: item.typeAlat,
-        actual: avgActual,
-        plan: planValue,
-        deviation,
-        deviationPct,
-        isOver,
-        totalVolume: item.totalVolume,
-        totalHours: item.totalHours,
-        recordCount: item.recordCount
-      };
-    });
-  }, [filteredRecords, plans]);
+        return {
+          idAlat: item.idAlat,
+          egy: item.egy,
+          typeAlat: item.typeAlat,
+          actual: avgActual,
+          plan: planValue,
+          planSource: resolved.source,
+          deviation,
+          deviationPct,
+          isOver,
+          totalVolume: item.totalVolume,
+          totalHours: item.totalHours,
+          recordCount: item.recordCount
+        };
+      });
+  }, [filteredRecords, plans, egyPlans]);
 
   // List of only over-plan units
   const overPlanUnits = useMemo(() => {
@@ -850,7 +939,7 @@ export default function App() {
     setPlans(INITIAL_PLANS);
     setStartDate("2026-04-01");
     setEndDate("2026-05-27");
-    setSelectedTypeFilter("SEMUA");
+    setSelectedEgyFilter("SEMUA");
     setSelectedStorageFilter("SEMUA");
     setFileFeedback({ type: "success", message: "Database kembali menggunakan 25 Log data contoh PT. WAHANA BARA SENTOSA dan mereset active cloud cache." });
   };
@@ -949,7 +1038,7 @@ export default function App() {
           }
           
           setRecords(parsed);
-          setSelectedTypeFilter("SEMUA");
+          setSelectedEgyFilter("SEMUA");
           setSelectedStorageFilter("SEMUA");
           setFileFeedback({
             type: "success",
@@ -1057,18 +1146,18 @@ export default function App() {
         const isIssuedSheet = logsSheetName.toLowerCase() === "issued" || logsSheetName.toLowerCase().includes("issue");
         
         let colMap = {
-          tanggal: isIssuedSheet ? 6 : 0,      // Column G (index 6): tanggal
-          storage: isIssuedSheet ? 7 : 1,      // Column H (index 7): storage pengisian fuel
-          idAlat: isIssuedSheet ? 8 : 2,       // Column I (index 8): Unit
-          typeAlat: isIssuedSheet ? 9 : 3,     // Column J (index 9): Kategori unit
-          brandAlat: isIssuedSheet ? 10 : -1,  // Column K (index 10): Type.brand unit
-          hmSebelum: isIssuedSheet ? 11 : 4,   // Column L (index 11): HM pengisian fuel sebelumnya
-          hmSaatIni: isIssuedSheet ? 12 : 5,   // Column M (index 12): HM pengisian fuel pada tanggal itu
-          volumeFuel: isIssuedSheet ? 14 : 6,  // Column O (index 14): jumlah fuel yang diisi
-          operator: isIssuedSheet ? 18 : 7,    // Column S (index 18): nama operator unit
-          fuelman: isIssuedSheet ? 20 : 8,     // Column U (index 20)
-          shift: isIssuedSheet ? 21 : 9,       // Column V (index 21)
-          jam: isIssuedSheet ? 22 : 10         // Column W (index 22)
+          tanggal: 6,                          // Column G (index 6): tanggal
+          storage: 7,                          // Column H (index 7): storage pengisian fuel
+          idAlat: 8,                           // Column I (index 8): Unit / Equipment ID
+          typeAlat: 9,                         // Column J (index 9): Kategori unit
+          brandAlat: 10,                       // Column K (index 10): Type.brand unit
+          hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
+          hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
+          volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi
+          operator: 18,                        // Column S (index 18): nama operator unit
+          fuelman: 20,                         // Column U (index 20)
+          shift: 21,                           // Column V (index 21)
+          jam: 22                              // Column W (index 22)
         };
 
         let detectedHeaderRowIdx = -1;
@@ -1254,11 +1343,11 @@ export default function App() {
           }
         }
 
-        const startRowIndex = isIssuedSheet ? 108 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
+        const startRowIndex = isIssuedSheet ? 109 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
         const parsed: FuelRecord[] = [];
 
         rawJson.forEach((row, index) => {
-          if (index < startRowIndex) return; // skip headers
+          if (index < startRowIndex) return; // skip headers (starts at row 110 for Issued sheet)
           if (!row || row.length < Math.max(2, colMap.idAlat + 1)) return;
           
           // Double check to make sure redundant labels are skipped
@@ -1289,14 +1378,27 @@ export default function App() {
           
           if (!tanggal) return;
           
-          const idAlat = getCell(colMap.idAlat).toUpperCase();
-          if (!idAlat) return;
+          // Prioritize Column I (index 8)
+          let idAlat = "";
+          if (row.length > 8 && row[8] !== undefined && row[8] !== null) {
+            idAlat = String(row[8]).trim().toUpperCase();
+          }
+          if (!idAlat) {
+            idAlat = getCell(colMap.idAlat).toUpperCase();
+          }
+
+          // REJECT INVALID UNIT IDS (Decimals, numbers, single letters, totals, formula errors)
+          if (!idAlat || idAlat.length < 2) return;
+          if (!isNaN(Number(idAlat))) return;
+          if (idAlat.includes(".") && !isNaN(parseFloat(idAlat))) return;
+          if (idAlat === "C" || idAlat === "A" || idAlat === "B" || idAlat === "D" || idAlat === "TOTAL" || idAlat === "N/A" || idAlat.includes("#REF") || idAlat.includes("DIV/0")) return;
+          if (idAlat.toLowerCase().includes("tanggal") || idAlat.toLowerCase().includes("unit") || idAlat.toLowerCase().includes("nomor") || idAlat.toLowerCase().includes("operator")) return;
           
           const storage = getCell(colMap.storage, "Storage Utama Central");
           
-          // Map strictly to Kategori Unit (column J)
+          // Map strictly to Kategori Unit (column J) or derive from ID
           const kategoriVal = getCell(colMap.typeAlat, "").trim();
-          const typeAlat = kategoriVal || "Excavator PC200";
+          const typeAlat = kategoriVal || deriveEquipmentType(idAlat);
 
           const hmSebelum = getFloatCell(colMap.hmSebelum, 0);
           const hmSaatIni = getFloatCell(colMap.hmSaatIni, 0);
@@ -1330,7 +1432,7 @@ export default function App() {
           setPlans(plansExtracted);
         }
         setRecords(parsed);
-        setSelectedTypeFilter("SEMUA");
+        setSelectedEgyFilter("SEMUA");
         setSelectedStorageFilter("SEMUA");
         
         const validDates = parsed.map(p => p.tanggal).filter(t => t);
@@ -1398,16 +1500,32 @@ export default function App() {
           }
 
           const typeGroupMap: Record<string, { totalVolume: number; totalHours: number; recordCount: number }> = {};
+          const unitGroupMap: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
+
           parsed.forEach(r => {
-            const t = r.typeAlat || "Lainnya";
-            if (!typeGroupMap[t]) {
-              typeGroupMap[t] = { totalVolume: 0, totalHours: 0, recordCount: 0 };
+            const egy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+            const id = r.idAlat || "UNIT-UNKNOWN";
+            const t = r.typeAlat || egy;
+
+            // Group by Egy for high-level type summaries
+            if (!typeGroupMap[egy]) {
+              typeGroupMap[egy] = { totalVolume: 0, totalHours: 0, recordCount: 0 };
             }
-            typeGroupMap[t].totalVolume += r.volumeFuel;
+            typeGroupMap[egy].totalVolume += r.volumeFuel;
             if (!r.isAnomaly && r.selisihHm > 0) {
-              typeGroupMap[t].totalHours += r.selisihHm;
+              typeGroupMap[egy].totalHours += r.selisihHm;
             }
-            typeGroupMap[t].recordCount += 1;
+            typeGroupMap[egy].recordCount += 1;
+
+            // Group by Unit for granular unit summaries
+            if (!unitGroupMap[id]) {
+              unitGroupMap[id] = { idAlat: id, egy, typeAlat: t, totalVolume: 0, totalHours: 0, recordCount: 0 };
+            }
+            unitGroupMap[id].totalVolume += r.volumeFuel;
+            if (!r.isAnomaly && r.selisihHm > 0) {
+              unitGroupMap[id].totalHours += r.selisihHm;
+            }
+            unitGroupMap[id].recordCount += 1;
           });
 
           const totalVol = parsed.reduce((sum, r) => sum + r.volumeFuel, 0);
@@ -1424,12 +1542,22 @@ export default function App() {
             totalHours: Number(totalHrs.toFixed(1)),
             recordCount: parsed.length,
             avgBurnRate: totalHrs > 0 ? Number((totalVol / totalHrs).toFixed(2)) : 0,
-            typeSummaries: Object.entries(typeGroupMap).map(([typeAlat, val]) => ({
-              typeAlat,
+            typeSummaries: Object.entries(typeGroupMap).map(([egy, val]) => ({
+              egy,
+              typeAlat: egy,
               totalVolume: Number(val.totalVolume.toFixed(1)),
               totalHours: Number(val.totalHours.toFixed(1)),
               recordCount: val.recordCount,
               burnRate: val.totalHours > 0 ? Number((val.totalVolume / val.totalHours).toFixed(2)) : 0
+            })),
+            unitSummaries: Object.values(unitGroupMap).map(u => ({
+              idAlat: u.idAlat,
+              egy: u.egy,
+              typeAlat: u.typeAlat,
+              totalVolume: Number(u.totalVolume.toFixed(1)),
+              totalHours: Number(u.totalHours.toFixed(1)),
+              recordCount: u.recordCount,
+              burnRate: u.totalHours > 0 ? Number((u.totalVolume / u.totalHours).toFixed(2)) : 0
             }))
           };
 
@@ -1600,11 +1728,11 @@ export default function App() {
   }, [records]);
 
   const isAnomaliesFiltered = useMemo(() => {
-    return selectedTypeFilter !== "SEMUA" || selectedStorageFilter !== "SEMUA";
-  }, [selectedTypeFilter, selectedStorageFilter]);
+    return selectedEgyFilter !== "SEMUA" || selectedStorageFilter !== "SEMUA";
+  }, [selectedEgyFilter, selectedStorageFilter]);
 
   const handleClearFilters = () => {
-    setSelectedTypeFilter("SEMUA");
+    setSelectedEgyFilter("SEMUA");
     setSelectedStorageFilter("SEMUA");
     if (records.length > 0) {
       const validDates = records.map(p => p.tanggal).filter(t => t);
@@ -1664,15 +1792,15 @@ export default function App() {
       {/* Main Container */}
       <main className="flex-1 max-w-7xl w-full mx-auto p-4 sm:p-6 space-y-6">
         
-        {/* Navigation Tabs row below Header with Firestore Sync Badge */}
+        {/* Navigation Tabs row below Header with Cloud Synch Badge */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 w-full sm:w-auto max-w-md shadow-sm">
+          <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 w-full sm:w-auto shadow-sm">
             <button
               onClick={() => {
                 setActiveTab("dashboard");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
                 activeTab === "dashboard"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
@@ -1686,7 +1814,7 @@ export default function App() {
                 setActiveTab("yearly");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex-1 flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
                 activeTab === "yearly"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
@@ -1695,30 +1823,64 @@ export default function App() {
               <Calendar className="w-4 h-4" />
               <span>YEARLY REVIEW</span>
             </button>
+            <button
+              onClick={() => {
+                setActiveTab("plan");
+                setViewingAnomaliesPage(false);
+              }}
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                activeTab === "plan"
+                  ? "bg-[#1E293B] text-white shadow"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <SlidersHorizontal className="w-4 h-4" />
+              <span>INPUT PLAN FUEL BURN</span>
+            </button>
           </div>
 
-          {/* Firestore Connection & Realtime Sync Status Badge */}
-          <div className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-white border border-slate-200 shadow-xs text-xs font-medium text-slate-700">
-            <span className="relative flex h-2.5 w-2.5">
-              <span className={`animate-ping absolute inline-flex h-full w-full rounded-full opacity-75 ${firestoreSyncStatus.isSynced ? 'bg-emerald-400' : 'bg-amber-400'}`}></span>
-              <span className={`relative inline-flex rounded-full h-2.5 w-2.5 ${firestoreSyncStatus.isSynced ? 'bg-emerald-500' : 'bg-amber-500'}`}></span>
-            </span>
-            <div className="flex items-center gap-1.5">
-              <span className="font-bold text-slate-800">
-                {firestoreSyncStatus.isSynced ? "Cloud Firestore (fuel-wbs)" : "Local Storage Mode"}
-              </span>
-              <span className="text-slate-400">•</span>
-              <span className="text-slate-500 text-[11px]">
-                {firestoreSyncStatus.isSynced 
-                  ? `${records.length} Baris Data Terkoneksi Realtime` 
-                  : `${records.length} Baris Data Tersimpan`}
-              </span>
-            </div>
+          {/* Cloud Synch Status Indicator (Green when connected, Red when off) */}
+          <div className="flex items-center gap-2">
+            {firestoreSyncStatus.isSynced ? (
+              <div 
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 shadow-xs text-xs font-bold text-emerald-800 transition"
+                title={`Cloud Synch: Terkoneksi Realtime ke Firestore (${records.length} baris data)`}
+              >
+                <span className="relative flex h-2.5 w-2.5">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
+                </span>
+                <Cloud className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <span className="tracking-wide">Cloud Synch</span>
+              </div>
+            ) : (
+              <div 
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 shadow-xs text-xs font-bold text-rose-800 transition"
+                title="Cloud Synch: Offline / Mode Penyimpanan Lokal"
+              >
+                <span className="inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
+                <CloudOff className="w-4 h-4 text-rose-600" />
+                <span className="tracking-wide">Cloud Synch</span>
+              </div>
+            )}
           </div>
         </div>
 
-        {activeTab === "yearly" ? (
-          <YearlyReview onBackToDashboard={() => setActiveTab("dashboard")} />
+        {activeTab === "plan" ? (
+          <PlanFuelBurnPage
+            egyPlans={egyPlans}
+            unitRegistry={unitRegistry}
+            onSaveEgyPlans={handleSaveEgyPlans}
+            onSaveUnitRegistry={handleSaveUnitRegistry}
+            records={records}
+            onBackToDashboard={() => setActiveTab("dashboard")}
+          />
+        ) : activeTab === "yearly" ? (
+          <YearlyReview 
+            onBackToDashboard={() => setActiveTab("dashboard")} 
+            egyPlans={egyPlans} 
+            onOpenPlanManager={() => setActiveTab("plan")} 
+          />
         ) : viewingAnomaliesPage ? (
           <AnomalyDetailsView
             anomalousRecords={anomalousRecords}
@@ -1726,7 +1888,7 @@ export default function App() {
             onBack={() => setViewingAnomaliesPage(false)}
             startDate={startDate}
             endDate={endDate}
-            selectedType={selectedTypeFilter}
+            selectedEgy={selectedEgyFilter}
             selectedStorage={selectedStorageFilter}
             isFiltered={isAnomaliesFiltered}
             onClearFilters={handleClearFilters}
@@ -2252,21 +2414,21 @@ export default function App() {
             </div>
           </div>
 
-          {/* Advanced Multi-Attribute Filters (Equipment Type, Storage Gate) */}
+          {/* Advanced Multi-Attribute Filters (Egy Alat, Storage Gate) */}
           <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
             <div className="flex flex-col">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                 <Filter className="w-3 h-3 text-[#4682B4]" />
-                <span>KATEGORI UNIT ALAT</span>
+                <span>EGY ALAT (EQUIPMENT)</span>
               </label>
               <select
-                value={selectedTypeFilter}
-                onChange={(e) => setSelectedTypeFilter(e.target.value)}
-                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 mt-1 select-none w-full sm:w-44 focus:border-[#4682B4] focus:outline-none font-medium text-slate-700 cursor-pointer"
+                value={selectedEgyFilter}
+                onChange={(e) => setSelectedEgyFilter(e.target.value)}
+                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 mt-1 select-none w-full sm:w-56 focus:border-[#4682B4] focus:outline-none font-medium text-slate-700 cursor-pointer"
               >
-                <option value="SEMUA">Semua Kategori Unit</option>
-                {uniqueEquipmentTypes.map(t => (
-                  <option key={t} value={t}>{t}</option>
+                <option value="SEMUA">Semua Egy Alat</option>
+                {uniqueEgys.map(egy => (
+                  <option key={egy} value={egy}>{egy}</option>
                 ))}
               </select>
             </div>
@@ -2444,8 +2606,17 @@ export default function App() {
             )}
           </div>
 
+          {/* PENILAIAN PLAN VS ACTUAL FUEL BURN BERDASARKAN JENIS EGY */}
+          <PlanVsActualAssessment
+            records={filteredRecords}
+            egyPlans={egyPlans}
+            unitPlans={plans}
+            onOpenPlanManager={() => setActiveTab("plan")}
+            selectedEgyFilter={selectedEgyFilter}
+          />
+
           {/* Central Pareto Layout */}
-          <ParetoChart records={filteredRecords} selectedType="SEMUA" plans={plans} />
+          <ParetoChart records={filteredRecords} selectedType="SEMUA" plans={plans} egyPlans={egyPlans} />
 
           {/* Quick Metrics of anomalies across full log */}
           {globalAnomaliesCount > 0 && (
@@ -2475,6 +2646,15 @@ export default function App() {
         </>
       )}
       </main>
+
+      {/* MODAL PENGELOLA TARGET PLAN FUEL BURN PER JENIS EGY */}
+      <EgyPlanManagerModal
+        isOpen={isEgyPlanModalOpen}
+        onClose={() => setIsEgyPlanModalOpen(false)}
+        currentPlans={egyPlans}
+        onSavePlans={handleSaveEgyPlans}
+        availableEgysInDataset={availableEgys}
+      />
 
       {/* Corporate Styled Footer */}
       <footer className="bg-slate-900 border-t border-slate-800 text-slate-400 py-6 px-6 text-center text-xs tracking-wide shrink-0">

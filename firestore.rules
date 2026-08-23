@@ -52,6 +52,14 @@ service cloud.firestore {
       }
     }
 
+    // Plan settings / Egy target benchmarks collection
+    match /plan_settings/{settingId} {
+      allow get: if isValidId(settingId);
+      allow list: if true;
+      allow create, update: if isValidId(settingId);
+      allow delete: if isValidId(settingId);
+    }
+
     // Connection testing
     match /test/{testId} {
       allow read, write: if isValidId(testId);

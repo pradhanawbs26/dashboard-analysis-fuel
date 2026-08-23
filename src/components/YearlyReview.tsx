@@ -18,12 +18,27 @@ import {
   Trash2,
   Cloud,
   Database,
-  RefreshCw
+  RefreshCw,
+  SlidersHorizontal
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas-pro";
-import { normalizeDateToYMD } from "../data/sampleData";
+import { 
+  normalizeDateToYMD, 
+  deriveEgy, 
+  cleanEgyName, 
+  saveJulyBenchmarkRegistry, 
+  getJulyBenchmarkRegistry,
+  MASTER_JULY_BENCHMARKS,
+  MONTH_NAMES_IND
+} from "../data/sampleData";
+import UploadAnalysisModal, { 
+  AnalyzedUploadResult, 
+  AnalyzedEgySummary, 
+  AnalyzedUnitDetail 
+} from "./UploadAnalysisModal";
+import EgyPlanManagerModal from "./EgyPlanManagerModal";
 import { 
   subscribeToMonthlyReports, 
   fetchAllMonthlyReports,
@@ -32,26 +47,50 @@ import {
   testConnection 
 } from "../lib/firebase";
 import { getSyncLocalData, saveLocalData, removeLocalData } from "../lib/storage";
-import { MonthlyReportData } from "../types";
+import { MonthlyReportData, EgyPlanMap } from "../types";
+import { getStoredEgyPlans, saveStoredEgyPlans, subscribeToEgyPlans, DEFAULT_EGY_PLANS } from "../lib/egyPlanService";
 
 interface YearlyReviewProps {
   onBackToDashboard?: () => void;
+  egyPlans?: EgyPlanMap;
+  onOpenPlanManager?: () => void;
 }
 
-// Hardcoded standard plans for equipment types matching the main database
+// Hardcoded standard plans for equipment types matching the July Benchmark (Jenis Egy)
 const DEFAULT_TYPE_PLANS: Record<string, number> = {
-  "Excavator PC200": 22.0,
-  "Dump Truck HD785": 72.0,
-  "Bulldozer D85SS": 25.0,
-  "Motor Grader GD511": 17.5,
-  "Wheel Loader WA500": 30.0,
+  "DUMP TRUCK": 7.5,
+  "FLAT DECK": 7.0,
+  "EXCAVATOR": 18.0,
+  "BULLDOZER": 28.0,
+  "CRANE TRUCK": 6.5,
+  "FUEL TRUCK": 7.0,
+  "FORKLIFT": 6.0,
+  "WATER TRUCK": 6.0,
+  "REACH STACKER": 12.5,
+  "TOWER LAMP": 3.0,
+  "LIGHT VEHICLE": 4.0,
+  "MOTOR GRADER": 10.0,
+  "WHEEL LOADER": 24.0,
+  "COMPACTOR": 8.0,
+  "GENSET": 25.1,
+  // Individual Models as secondary fallback
+  "GENSET EX PT MAS": 25.1,
+  "HINO 500 (FM260JD)": 7.5,
+  "HINO 500 (FM280JD)": 6.5,
+  "HYUNDAI PC 495": 30.0,
+  "KOMATSU FD150E - 8": 6.0,
+  "KOMATSU GD 535": 10.0,
+  "KOMATSU PC 210": 13.0,
+  "CAT 320 GC": 16.0,
+  "CATERPILAR D8T": 28.0,
+  "KONECRANE 45T": 12.5,
+  "DUTRO 136 HD": 6.0,
+  "TOYOTA INNOVA": 4.0,
+  "KOMATSU D85SS": 25.0,
+  "KOMATSU WA 500": 24.0,
+  "CAT 980 NG": 24.0,
+  "CATERPILAR CS 11 GC": 8.0,
 };
-
-// Default Months List order
-const MONTH_NAMES_IND = [
-  "Januari", "Februari", "Maret", "April", "Mei", "Juni",
-  "Juli", "Agustus", "September", "Oktober", "November", "Desember"
-];
 
 // Helper to check if string contains Indonesian month names and return standard index
 function getMonthFromText(text: string): number {
@@ -71,60 +110,173 @@ function getMonthFromText(text: string): number {
   return -1;
 }
 
-// Built-in Year-round high-fidelity sample datasets to show beautiful analytics instantly!
+// Built-in Year-round high-fidelity sample datasets strictly grouped by July Benchmark Egy (Januari - Juni)
 const SAMPLE_YEARLY_DATA = [
   // Januari
-  { bulan: "Januari", typeAlat: "Excavator PC200", totalVolume: 11450, totalHours: 512, recordCount: 140 },
-  { bulan: "Januari", typeAlat: "Dump Truck HD785", totalVolume: 28400, totalHours: 390, recordCount: 125 },
-  { bulan: "Januari", typeAlat: "Bulldozer D85SS", totalVolume: 8250, totalHours: 322, recordCount: 92 },
-  { bulan: "Januari", typeAlat: "Motor Grader GD511", totalVolume: 3450, totalHours: 195, recordCount: 50 },
-  { bulan: "Januari", typeAlat: "Wheel Loader WA500", totalVolume: 4900, totalHours: 160, recordCount: 45 },
+  { bulan: "Januari", typeAlat: "DUMP TRUCK", totalVolume: 13400, totalHours: 2000, recordCount: 230 },
+  { bulan: "Januari", typeAlat: "FLAT DECK", totalVolume: 11200, totalHours: 1600, recordCount: 190 },
+  { bulan: "Januari", typeAlat: "EXCAVATOR", totalVolume: 14850, totalHours: 1100, recordCount: 165 },
+  { bulan: "Januari", typeAlat: "BULLDOZER", totalVolume: 2450, totalHours: 100, recordCount: 20 },
+  { bulan: "Januari", typeAlat: "CRANE TRUCK", totalVolume: 650, totalHours: 100, recordCount: 18 },
+  { bulan: "Januari", typeAlat: "FUEL TRUCK", totalVolume: 1370, totalHours: 200, recordCount: 40 },
+  { bulan: "Januari", typeAlat: "FORKLIFT", totalVolume: 840, totalHours: 140, recordCount: 25 },
+  { bulan: "Januari", typeAlat: "WATER TRUCK", totalVolume: 600, totalHours: 100, recordCount: 15 },
+  { bulan: "Januari", typeAlat: "REACH STACKER", totalVolume: 1300, totalHours: 100, recordCount: 35 },
+  { bulan: "Januari", typeAlat: "TOWER LAMP", totalVolume: 300, totalHours: 100, recordCount: 12 },
+  { bulan: "Januari", typeAlat: "LIGHT VEHICLE", totalVolume: 380, totalHours: 100, recordCount: 15 },
+  { bulan: "Januari", typeAlat: "MOTOR GRADER", totalVolume: 890, totalHours: 100, recordCount: 25 },
+  { bulan: "Januari", typeAlat: "WHEEL LOADER", totalVolume: 2400, totalHours: 100, recordCount: 22 },
+  { bulan: "Januari", typeAlat: "COMPACTOR", totalVolume: 800, totalHours: 100, recordCount: 16 },
+  { bulan: "Januari", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 },
 
   // Februari
-  { bulan: "Februari", typeAlat: "Excavator PC200", totalVolume: 12100, totalHours: 560, recordCount: 152 },
-  { bulan: "Februari", typeAlat: "Dump Truck HD785", totalVolume: 31200, totalHours: 420, recordCount: 130 },
-  { bulan: "Februari", typeAlat: "Bulldozer D85SS", totalVolume: 8900, totalHours: 340, recordCount: 100 },
-  { bulan: "Februari", typeAlat: "Motor Grader GD511", totalVolume: 3600, totalHours: 210, recordCount: 55 },
-  { bulan: "Februari", typeAlat: "Wheel Loader WA500", totalVolume: 5100, totalHours: 172, recordCount: 48 },
+  { bulan: "Februari", typeAlat: "DUMP TRUCK", totalVolume: 13800, totalHours: 2000, recordCount: 237 },
+  { bulan: "Februari", typeAlat: "FLAT DECK", totalVolume: 11400, totalHours: 1600, recordCount: 195 },
+  { bulan: "Februari", typeAlat: "EXCAVATOR", totalVolume: 15830, totalHours: 1100, recordCount: 166 },
+  { bulan: "Februari", typeAlat: "BULLDOZER", totalVolume: 2500, totalHours: 100, recordCount: 21 },
+  { bulan: "Februari", typeAlat: "CRANE TRUCK", totalVolume: 640, totalHours: 100, recordCount: 18 },
+  { bulan: "Februari", typeAlat: "FUEL TRUCK", totalVolume: 1410, totalHours: 200, recordCount: 42 },
+  { bulan: "Februari", typeAlat: "FORKLIFT", totalVolume: 850, totalHours: 142, recordCount: 26 },
+  { bulan: "Februari", typeAlat: "WATER TRUCK", totalVolume: 610, totalHours: 100, recordCount: 16 },
+  { bulan: "Februari", typeAlat: "REACH STACKER", totalVolume: 1230, totalHours: 100, recordCount: 32 },
+  { bulan: "Februari", typeAlat: "TOWER LAMP", totalVolume: 310, totalHours: 100, recordCount: 13 },
+  { bulan: "Februari", typeAlat: "LIGHT VEHICLE", totalVolume: 400, totalHours: 100, recordCount: 16 },
+  { bulan: "Februari", typeAlat: "MOTOR GRADER", totalVolume: 1040, totalHours: 100, recordCount: 28 },
+  { bulan: "Februari", typeAlat: "WHEEL LOADER", totalVolume: 2450, totalHours: 102, recordCount: 23 },
+  { bulan: "Februari", typeAlat: "COMPACTOR", totalVolume: 810, totalHours: 101, recordCount: 17 },
+  { bulan: "Februari", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 },
 
   // Maret
-  { bulan: "Maret", typeAlat: "Excavator PC200", totalVolume: 13400, totalHours: 595, recordCount: 168 },
-  { bulan: "Maret", typeAlat: "Dump Truck HD785", totalVolume: 35600, totalHours: 480, recordCount: 145 },
-  { bulan: "Maret", typeAlat: "Bulldozer D85SS", totalVolume: 9200, totalHours: 362, recordCount: 105 },
-  { bulan: "Maret", typeAlat: "Motor Grader GD511", totalVolume: 3900, totalHours: 220, recordCount: 60 },
-  { bulan: "Maret", typeAlat: "Wheel Loader WA500", totalVolume: 5800, totalHours: 190, recordCount: 54 },
+  { bulan: "Maret", typeAlat: "DUMP TRUCK", totalVolume: 14500, totalHours: 2000, recordCount: 243 },
+  { bulan: "Maret", typeAlat: "FLAT DECK", totalVolume: 11800, totalHours: 1600, recordCount: 200 },
+  { bulan: "Maret", typeAlat: "EXCAVATOR", totalVolume: 16820, totalHours: 1100, recordCount: 175 },
+  { bulan: "Maret", typeAlat: "BULLDOZER", totalVolume: 2580, totalHours: 100, recordCount: 22 },
+  { bulan: "Maret", typeAlat: "CRANE TRUCK", totalVolume: 660, totalHours: 100, recordCount: 19 },
+  { bulan: "Maret", typeAlat: "FUEL TRUCK", totalVolume: 1420, totalHours: 200, recordCount: 42 },
+  { bulan: "Maret", typeAlat: "FORKLIFT", totalVolume: 870, totalHours: 145, recordCount: 27 },
+  { bulan: "Maret", typeAlat: "WATER TRUCK", totalVolume: 620, totalHours: 100, recordCount: 16 },
+  { bulan: "Maret", typeAlat: "REACH STACKER", totalVolume: 1340, totalHours: 100, recordCount: 36 },
+  { bulan: "Maret", typeAlat: "TOWER LAMP", totalVolume: 300, totalHours: 100, recordCount: 12 },
+  { bulan: "Maret", typeAlat: "LIGHT VEHICLE", totalVolume: 420, totalHours: 100, recordCount: 18 },
+  { bulan: "Maret", typeAlat: "MOTOR GRADER", totalVolume: 970, totalHours: 100, recordCount: 27 },
+  { bulan: "Maret", typeAlat: "WHEEL LOADER", totalVolume: 2420, totalHours: 100, recordCount: 22 },
+  { bulan: "Maret", typeAlat: "COMPACTOR", totalVolume: 790, totalHours: 98, recordCount: 15 },
+  { bulan: "Maret", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 },
 
   // April
-  { bulan: "April", typeAlat: "Excavator PC200", totalVolume: 14050, totalHours: 630, recordCount: 175 },
-  { bulan: "April", typeAlat: "Dump Truck HD785", totalVolume: 38200, totalHours: 525, recordCount: 160 },
-  { bulan: "April", typeAlat: "Bulldozer D85SS", totalVolume: 9600, totalHours: 390, recordCount: 110 },
-  { bulan: "April", typeAlat: "Motor Grader GD511", totalVolume: 4100, totalHours: 245, recordCount: 65 },
-  { bulan: "April", typeAlat: "Wheel Loader WA500", totalVolume: 6200, totalHours: 205, recordCount: 60 },
+  { bulan: "April", typeAlat: "DUMP TRUCK", totalVolume: 14000, totalHours: 2000, recordCount: 232 },
+  { bulan: "April", typeAlat: "FLAT DECK", totalVolume: 11500, totalHours: 1600, recordCount: 194 },
+  { bulan: "April", typeAlat: "EXCAVATOR", totalVolume: 16200, totalHours: 1100, recordCount: 169 },
+  { bulan: "April", typeAlat: "BULLDOZER", totalVolume: 2520, totalHours: 100, recordCount: 21 },
+  { bulan: "April", typeAlat: "CRANE TRUCK", totalVolume: 650, totalHours: 100, recordCount: 18 },
+  { bulan: "April", typeAlat: "FUEL TRUCK", totalVolume: 1390, totalHours: 200, recordCount: 41 },
+  { bulan: "April", typeAlat: "FORKLIFT", totalVolume: 845, totalHours: 141, recordCount: 25 },
+  { bulan: "April", typeAlat: "WATER TRUCK", totalVolume: 590, totalHours: 100, recordCount: 15 },
+  { bulan: "April", typeAlat: "REACH STACKER", totalVolume: 1280, totalHours: 100, recordCount: 34 },
+  { bulan: "April", typeAlat: "TOWER LAMP", totalVolume: 310, totalHours: 100, recordCount: 13 },
+  { bulan: "April", typeAlat: "LIGHT VEHICLE", totalVolume: 390, totalHours: 100, recordCount: 16 },
+  { bulan: "April", typeAlat: "MOTOR GRADER", totalVolume: 1010, totalHours: 100, recordCount: 26 },
+  { bulan: "April", typeAlat: "WHEEL LOADER", totalVolume: 2410, totalHours: 100, recordCount: 22 },
+  { bulan: "April", typeAlat: "COMPACTOR", totalVolume: 805, totalHours: 100, recordCount: 16 },
+  { bulan: "April", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 },
 
   // Mei
-  { bulan: "Mei", typeAlat: "Excavator PC200", totalVolume: 13950, totalHours: 642, recordCount: 180 },
-  { bulan: "Mei", typeAlat: "Dump Truck HD785", totalVolume: 39500, totalHours: 540, recordCount: 165 },
-  { bulan: "Mei", typeAlat: "Bulldozer D85SS", totalVolume: 9100, totalHours: 350, recordCount: 98 },
-  { bulan: "Mei", typeAlat: "Motor Grader GD511", totalVolume: 4300, totalHours: 250, recordCount: 68 },
-  { bulan: "Mei", typeAlat: "Wheel Loader WA500", totalVolume: 6100, totalHours: 202, recordCount: 58 },
+  { bulan: "Mei", typeAlat: "DUMP TRUCK", totalVolume: 13700, totalHours: 2000, recordCount: 235 },
+  { bulan: "Mei", typeAlat: "FLAT DECK", totalVolume: 11300, totalHours: 1600, recordCount: 192 },
+  { bulan: "Mei", typeAlat: "EXCAVATOR", totalVolume: 15850, totalHours: 1100, recordCount: 165 },
+  { bulan: "Mei", typeAlat: "BULLDOZER", totalVolume: 2490, totalHours: 100, recordCount: 20 },
+  { bulan: "Mei", typeAlat: "CRANE TRUCK", totalVolume: 650, totalHours: 100, recordCount: 18 },
+  { bulan: "Mei", typeAlat: "FUEL TRUCK", totalVolume: 1400, totalHours: 200, recordCount: 42 },
+  { bulan: "Mei", typeAlat: "FORKLIFT", totalVolume: 855, totalHours: 142, recordCount: 26 },
+  { bulan: "Mei", typeAlat: "WATER TRUCK", totalVolume: 600, totalHours: 100, recordCount: 15 },
+  { bulan: "Mei", typeAlat: "REACH STACKER", totalVolume: 1250, totalHours: 100, recordCount: 33 },
+  { bulan: "Mei", typeAlat: "TOWER LAMP", totalVolume: 300, totalHours: 100, recordCount: 12 },
+  { bulan: "Mei", typeAlat: "LIGHT VEHICLE", totalVolume: 410, totalHours: 100, recordCount: 17 },
+  { bulan: "Mei", typeAlat: "MOTOR GRADER", totalVolume: 980, totalHours: 100, recordCount: 25 },
+  { bulan: "Mei", typeAlat: "WHEEL LOADER", totalVolume: 2440, totalHours: 101, recordCount: 23 },
+  { bulan: "Mei", typeAlat: "COMPACTOR", totalVolume: 795, totalHours: 99, recordCount: 16 },
+  { bulan: "Mei", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 },
 
   // Juni
-  { bulan: "Juni", typeAlat: "Excavator PC200", totalVolume: 14200, totalHours: 660, recordCount: 190 },
-  { bulan: "Juni", typeAlat: "Dump Truck HD785", totalVolume: 42100, totalHours: 570, recordCount: 182 },
-  { bulan: "Juni", typeAlat: "Bulldozer D85SS", totalVolume: 10400, totalHours: 412, recordCount: 115 },
-  { bulan: "Juni", typeAlat: "Motor Grader GD511", totalVolume: 4400, totalHours: 255, recordCount: 70 },
-  { bulan: "Juni", typeAlat: "Wheel Loader WA500", totalVolume: 6350, totalHours: 215, recordCount: 62 }
+  { bulan: "Juni", typeAlat: "DUMP TRUCK", totalVolume: 14200, totalHours: 2000, recordCount: 240 },
+  { bulan: "Juni", typeAlat: "FLAT DECK", totalVolume: 11600, totalHours: 1600, recordCount: 196 },
+  { bulan: "Juni", typeAlat: "EXCAVATOR", totalVolume: 16410, totalHours: 1100, recordCount: 173 },
+  { bulan: "Juni", typeAlat: "BULLDOZER", totalVolume: 2550, totalHours: 100, recordCount: 22 },
+  { bulan: "Juni", typeAlat: "CRANE TRUCK", totalVolume: 660, totalHours: 100, recordCount: 19 },
+  { bulan: "Juni", typeAlat: "FUEL TRUCK", totalVolume: 1430, totalHours: 200, recordCount: 43 },
+  { bulan: "Juni", typeAlat: "FORKLIFT", totalVolume: 865, totalHours: 144, recordCount: 26 },
+  { bulan: "Juni", typeAlat: "WATER TRUCK", totalVolume: 610, totalHours: 100, recordCount: 16 },
+  { bulan: "Juni", typeAlat: "REACH STACKER", totalVolume: 1300, totalHours: 100, recordCount: 35 },
+  { bulan: "Juni", typeAlat: "TOWER LAMP", totalVolume: 310, totalHours: 100, recordCount: 13 },
+  { bulan: "Juni", typeAlat: "LIGHT VEHICLE", totalVolume: 400, totalHours: 100, recordCount: 16 },
+  { bulan: "Juni", typeAlat: "MOTOR GRADER", totalVolume: 1020, totalHours: 100, recordCount: 27 },
+  { bulan: "Juni", typeAlat: "WHEEL LOADER", totalVolume: 2460, totalHours: 102, recordCount: 23 },
+  { bulan: "Juni", typeAlat: "COMPACTOR", totalVolume: 815, totalHours: 102, recordCount: 17 },
+  { bulan: "Juni", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 }
 ];
 
-export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
+export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans, onOpenPlanManager }: YearlyReviewProps) {
+  // Local fallback / synced egyPlans
+  const [internalEgyPlans, setInternalEgyPlans] = useState<EgyPlanMap>(() => getStoredEgyPlans());
+  const [isInternalPlanModalOpen, setIsInternalPlanModalOpen] = useState(false);
+
+  useEffect(() => {
+    const unsub = subscribeToEgyPlans((latest) => {
+      setInternalEgyPlans(latest);
+    });
+    return () => unsub();
+  }, []);
+
+  const activeEgyPlans = propEgyPlans || internalEgyPlans;
+
+  const handleOpenPlanManager = () => {
+    if (onOpenPlanManager) {
+      onOpenPlanManager();
+    } else {
+      setIsInternalPlanModalOpen(true);
+    }
+  };
+
   // Parsed records grouped by month and typeAlat - initialize from local storage cache for 0ms refresh flicker
   const [dataPoints, setDataPoints] = useState<Array<{
     bulan: string;      // Month name
-    typeAlat: string;   // Equipment type name
+    typeAlat: string;   // Canonical July Egy name
     totalVolume: number;
     totalHours: number;
     recordCount: number;
-  }>>(() => getSyncLocalData("yearly_data_points", []));
+  }>>(() => {
+    const cached = getSyncLocalData<Array<{
+      bulan: string;
+      typeAlat: string;
+      totalVolume: number;
+      totalHours: number;
+      recordCount: number;
+    }>>("yearly_data_points", []);
+
+    if (cached && cached.length > 0) {
+      // Re-map cached items through deriveEgy & cleanEgyName to guarantee July benchmark alignment
+      const aggMap: Record<string, { bulan: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
+      cached.forEach(pt => {
+        const canonicalEgy = cleanEgyName(deriveEgy(pt.typeAlat, pt.typeAlat));
+        const key = `${pt.bulan}___${canonicalEgy}`;
+        if (!aggMap[key]) {
+          aggMap[key] = {
+            bulan: pt.bulan,
+            typeAlat: canonicalEgy,
+            totalVolume: pt.totalVolume,
+            totalHours: pt.totalHours,
+            recordCount: pt.recordCount
+          };
+        } else {
+          aggMap[key].totalVolume += pt.totalVolume;
+          aggMap[key].totalHours += pt.totalHours;
+          aggMap[key].recordCount += pt.recordCount;
+        }
+      });
+      return Object.values(aggMap);
+    }
+    return SAMPLE_YEARLY_DATA;
+  });
 
   const [activeAnalysisMetric, setActiveAnalysisMetric] = useState<"burnRate" | "volume" | "hours">("burnRate");
   const [selectedHighlightType, setSelectedHighlightType] = useState<string>("SEMUA");
@@ -133,7 +285,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
   const [isProcessing, setIsProcessing] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error" | null; message: string }>({
     type: "success",
-    message: "Silakan unggah file Excel bulanan pada slot di bawah untuk mulai menganalisa."
+    message: "Data historis telah diselaraskan dengan patokan Egy Bulan Juli. Silakan unggah file Excel bulanan untuk memperbarui slot."
   });
 
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -143,7 +295,12 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
   const [isCloudConnected, setIsCloudConnected] = useState<boolean>(true);
   const [isSyncingCloud, setIsSyncingCloud] = useState<boolean>(false);
 
-  // Helper to parse MonthlyReportData array into data points
+  // Staging Analysis Modal State for Pre-Commit Review & Verification
+  const [analysisStagingData, setAnalysisStagingData] = useState<AnalyzedUploadResult | null>(null);
+  const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState<boolean>(false);
+  const [isApplyingAnalysis, setIsApplyingAnalysis] = useState<boolean>(false);
+
+  // Helper to parse MonthlyReportData array into data points with July Egy normalization
   const processReportsIntoPoints = (reports: MonthlyReportData[]) => {
     if (!reports || reports.length === 0) return;
     const allPts: Array<{
@@ -159,11 +316,24 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
       if (!cloudMonths.includes(rep.bulan)) {
         cloudMonths.push(rep.bulan);
       }
-      if (rep.typeSummaries && rep.typeSummaries.length > 0) {
-        rep.typeSummaries.forEach((ts) => {
+      if (rep.unitSummaries && rep.unitSummaries.length > 0) {
+        rep.unitSummaries.forEach((us) => {
+          const canonicalEgy = cleanEgyName(deriveEgy(us.idAlat, us.typeAlat || us.egy));
           allPts.push({
             bulan: rep.bulan,
-            typeAlat: ts.typeAlat,
+            typeAlat: canonicalEgy,
+            totalVolume: us.totalVolume,
+            totalHours: us.totalHours,
+            recordCount: us.recordCount || 1
+          });
+        });
+      } else if (rep.typeSummaries && rep.typeSummaries.length > 0) {
+        rep.typeSummaries.forEach((ts) => {
+          // Normalize to July benchmark Egy
+          const canonicalEgy = cleanEgyName(deriveEgy(ts.typeAlat, ts.egy || ts.typeAlat));
+          allPts.push({
+            bulan: rep.bulan,
+            typeAlat: canonicalEgy,
             totalVolume: ts.totalVolume,
             totalHours: ts.totalHours,
             recordCount: ts.recordCount
@@ -173,10 +343,142 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
     });
 
     if (allPts.length > 0) {
-      setDataPoints(allPts);
+      // Group by (bulan, typeAlat)
+      const aggMap: Record<string, { bulan: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
+      allPts.forEach(p => {
+        const k = `${p.bulan}___${p.typeAlat}`;
+        if (!aggMap[k]) {
+          aggMap[k] = { ...p };
+        } else {
+          aggMap[k].totalVolume += p.totalVolume;
+          aggMap[k].totalHours += p.totalHours;
+          aggMap[k].recordCount += p.recordCount;
+        }
+      });
+      const unifiedPts = Object.values(aggMap).map(p => ({
+        ...p,
+        totalVolume: Number(p.totalVolume.toFixed(1)),
+        totalHours: Number(p.totalHours.toFixed(1))
+      }));
+
+      setDataPoints(unifiedPts);
       setUploadedMonths(cloudMonths);
-      saveLocalData("yearly_data_points", allPts);
+      saveLocalData("yearly_data_points", unifiedPts);
       saveLocalData("yearly_uploaded_months", cloudMonths);
+    }
+  };
+
+  // One-click Re-synchronizer to align all historical data (Jan-Jun) to July Egy Benchmark
+  const handleSyncToJulyBenchmark = async () => {
+    setIsProcessing(true);
+    setFeedback({ type: null, message: "" });
+    try {
+      // 1. Fetch latest Cloud Reports if available to re-aggregate completely from units
+      let cloudReports: MonthlyReportData[] = [];
+      try {
+        cloudReports = await fetchAllMonthlyReports();
+      } catch (e) {
+        console.warn("Could not fetch cloud reports during sync:", e);
+      }
+
+      if (cloudReports && cloudReports.length > 0) {
+        for (const rep of cloudReports) {
+          let updatedSummaries = rep.typeSummaries || [];
+          if (rep.unitSummaries && rep.unitSummaries.length > 0) {
+            const egyAgg: Record<string, { totalVolume: number; totalHours: number; recordCount: number }> = {};
+            rep.unitSummaries.forEach(us => {
+              const canon = cleanEgyName(deriveEgy(us.idAlat, us.typeAlat || us.egy));
+              if (!egyAgg[canon]) {
+                egyAgg[canon] = { totalVolume: 0, totalHours: 0, recordCount: 0 };
+              }
+              egyAgg[canon].totalVolume += us.totalVolume;
+              egyAgg[canon].totalHours += us.totalHours;
+              egyAgg[canon].recordCount += us.recordCount || 1;
+            });
+            updatedSummaries = Object.entries(egyAgg).map(([egy, val]) => ({
+              egy,
+              typeAlat: egy,
+              totalVolume: Number(val.totalVolume.toFixed(1)),
+              totalHours: Number(val.totalHours.toFixed(1)),
+              recordCount: val.recordCount,
+              burnRate: val.totalHours > 0 ? Number((val.totalVolume / val.totalHours).toFixed(2)) : 0
+            }));
+          } else {
+            updatedSummaries = (rep.typeSummaries || []).map(ts => {
+              const canon = cleanEgyName(deriveEgy(ts.typeAlat, ts.egy || ts.typeAlat));
+              return {
+                ...ts,
+                egy: canon,
+                typeAlat: canon,
+              };
+            });
+          }
+
+          try {
+            await saveMonthlyReportToFirestore({
+              ...rep,
+              typeSummaries: updatedSummaries
+            });
+          } catch (err) {
+            console.warn("Firestore save update notice:", err);
+          }
+        }
+        processReportsIntoPoints(cloudReports);
+      } else {
+        // Fallback: Re-map current state dataPoints
+        const currentPoints = dataPoints.length > 0 ? dataPoints : SAMPLE_YEARLY_DATA;
+        const remapped: Array<{
+          bulan: string;
+          typeAlat: string;
+          totalVolume: number;
+          totalHours: number;
+          recordCount: number;
+        }> = [];
+
+        currentPoints.forEach(pt => {
+          const canonicalEgy = cleanEgyName(deriveEgy(pt.typeAlat, pt.typeAlat));
+          remapped.push({
+            bulan: pt.bulan,
+            typeAlat: canonicalEgy,
+            totalVolume: pt.totalVolume,
+            totalHours: pt.totalHours,
+            recordCount: pt.recordCount
+          });
+        });
+
+        // Group by (bulan, typeAlat)
+        const aggMap: Record<string, { bulan: string; typeAlat: string; totalVolume: number; totalHours: number; recordCount: number }> = {};
+        remapped.forEach(p => {
+          const k = `${p.bulan}___${p.typeAlat}`;
+          if (!aggMap[k]) {
+            aggMap[k] = { ...p };
+          } else {
+            aggMap[k].totalVolume += p.totalVolume;
+            aggMap[k].totalHours += p.totalHours;
+            aggMap[k].recordCount += p.recordCount;
+          }
+        });
+        const unifiedPts = Object.values(aggMap).map(p => ({
+          ...p,
+          totalVolume: Number(p.totalVolume.toFixed(1)),
+          totalHours: Number(p.totalHours.toFixed(1))
+        }));
+
+        setDataPoints(unifiedPts);
+        saveLocalData("yearly_data_points", unifiedPts);
+      }
+
+      setIsProcessing(false);
+      setFeedback({
+        type: "success",
+        message: `Data berhasil diselaraskan ke patokan Egy Juli.`
+      });
+    } catch (e: any) {
+      setIsProcessing(false);
+      setFeedback({
+        type: "error",
+        message: `Gagal menyelaraskan data: ${e.message}`
+      });
     }
   };
 
@@ -191,12 +493,12 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
         processReportsIntoPoints(reports);
         setFeedback({
           type: "success",
-          message: `Berhasil menyinkronkan ${reports.length} bulan data dari Cloud Firestore (fuel-wbs)!`
+          message: `Berhasil sinkron ${reports.length} bulan dari Firestore.`
         });
       } else {
         setFeedback({
           type: "success",
-          message: "Koneksi Cloud Firestore aktif. Belum ada dokumen laporan bulanan yang tersimpan."
+          message: "Koneksi Firestore aktif (belum ada data tersimpan)."
         });
       }
     } catch (err: any) {
@@ -204,7 +506,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
       setIsCloudConnected(false);
       setFeedback({
         type: "error",
-        message: `Gagal menyinkronkan dari Firestore: ${err.message || "Periksa koneksi internet."}`
+        message: `Gagal sinkron Firestore: ${err.message || "Koneksi terputus."}`
       });
     }
   };
@@ -545,19 +847,84 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           recordCount: number;
         }> = [];
 
+        // Parse and detect any Benchmark sheet / "List & FC" / July table (Column C: Equipment, Column D: Egy, Column E: Type)
+        const egyLookup: Record<string, string> = {};
+        workbook.SheetNames.forEach(sName => {
+          const sObj = workbook.Sheets[sName];
+          const rows = XLSX.utils.sheet_to_json<any[]>(sObj, { header: 1 });
+          if (!rows || rows.length < 2) return;
+          
+          rows.forEach((row) => {
+            if (!row || !Array.isArray(row)) return;
+
+            // Case A: List & FC sheet (Col A: Unit, Col B: Type, Col C: Egy)
+            if (sName.toLowerCase().includes("list") || sName.toLowerCase().includes("fc")) {
+              const unitCell = row[0];
+              const typeCell = row[1];
+              const egyCell = row[2];
+              if (unitCell) {
+                const uId = String(unitCell).trim().toUpperCase();
+                const typeStr = typeCell ? String(typeCell).trim() : "";
+                let egyVal = egyCell !== undefined && egyCell !== null ? String(egyCell).trim() : "";
+                if (!egyVal || !isNaN(parseFloat(egyVal))) {
+                  egyVal = deriveEgy(uId, typeStr);
+                }
+                if (uId && uId !== "NOMOR UNIT" && uId !== "UNIT" && !uId.includes("TANGGAL")) {
+                  egyLookup[uId] = egyVal;
+                  saveJulyBenchmarkRegistry({ [uId]: { egy: egyVal, type: typeStr } });
+                }
+              }
+            }
+
+            // Case B: July Benchmark structure (Col C: Equipment, Col D: Egy, Col E: Type)
+            const eqCell = row[2];  // Column C
+            const egyCell = row[3]; // Column D
+            const typeCell = row[4];// Column E
+            if (eqCell && egyCell) {
+              const eqStr = String(eqCell).trim().toUpperCase();
+              const egyStr = String(egyCell).trim();
+              const typeStr = typeCell ? String(typeCell).trim() : "";
+              if (
+                eqStr && 
+                !eqStr.includes("EQUIPMENT") && 
+                !eqStr.includes("UNIT") && 
+                !eqStr.includes("NO") && 
+                !eqStr.includes("TANGGAL") &&
+                egyStr &&
+                !egyStr.includes("EGY") &&
+                isNaN(parseFloat(egyStr))
+              ) {
+                const cleanEgy = cleanEgyName(egyStr);
+                egyLookup[eqStr] = cleanEgy;
+                saveJulyBenchmarkRegistry({ [eqStr]: { egy: cleanEgy, type: typeStr } });
+              }
+            }
+          });
+        });
+
         // Track how many sheets were parsed successfully
         let sheetsCountParsed = 0;
+        const allUnitAggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
 
-        // Loop sheets
-        for (let i = 0; i < workbook.SheetNames.length; i++) {
-          const sheetName = workbook.SheetNames[i];
-          
-          // Skip known plans reference sheets
-          if (sheetName.toLowerCase() === "list & fc" || sheetName.toLowerCase().includes("legend") || sheetName.toLowerCase().includes("meta")) {
-            continue;
-          }
+        // Find sheet "Issued" specifically if present
+        const issuedSheetName = workbook.SheetNames.find(
+          s => s.trim().toLowerCase() === "issued" || s.trim().toLowerCase().includes("issue")
+        );
 
+        // Process ONLY the "Issued" sheet when available, or valid transaction sheets
+        const sheetsToProcess = issuedSheetName
+          ? [issuedSheetName]
+          : workbook.SheetNames.filter(s => {
+              const lower = s.trim().toLowerCase();
+              return !lower.includes("list") && !lower.includes("fc") && !lower.includes("legend") && !lower.includes("meta") && !lower.includes("pivot") && !lower.includes("chart") && !lower.includes("summary") && !lower.includes("rekap");
+            });
+
+        // Loop target sheets
+        for (let i = 0; i < sheetsToProcess.length; i++) {
+          const sheetName = sheetsToProcess[i];
           const sheet = workbook.Sheets[sheetName];
+          if (!sheet) continue;
+
           const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
           if (rawRows.length < 2) continue; // too empty
 
@@ -576,45 +943,20 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           const isJuneOrLater = currentMonthIdx >= 5; // 5 = Juni, 6 = Juli, etc.
 
           let colMap = {
-            tanggal: isIssuedSheet ? 6 : 0,      // Column G (index 6)
-            storage: isIssuedSheet ? 7 : 1,      // Column H (index 7)
-            idAlat: isIssuedSheet ? 8 : 2,       // Column I (index 8)
-            typeAlat: isIssuedSheet ? (isJuneOrLater ? 10 : 9) : 3,     // Column K (index 10) from June onwards else Column J (index 9)
-            hmSebelum: isIssuedSheet ? (isJuneOrLater ? 11 : 10) : 4,   // Column L from June onwards (index 11) else Column K (index 10)
-            hmSaatIni: isIssuedSheet ? (isJuneOrLater ? 12 : 11) : 5,   // Column M from June onwards (index 12) else Column L (index 11)
-            volumeFuel: isIssuedSheet ? (isJuneOrLater ? 14 : 13) : 6,  // Column O from June onwards (index 14) else Column N (index 13)
+            tanggal: 6,                                                 // Column G (index 6)
+            storage: 7,                                                 // Column H (index 7)
+            idAlat: 8,                                                  // Column I (index 8) - Nomor Equipment
+            typeAlat: isJuneOrLater ? 10 : 9,                           // Column K (index 10) or Column J (index 9)
+            hmSebelum: isJuneOrLater ? 11 : 10,                         // Column L (index 11) or Column K (index 10)
+            hmSaatIni: isJuneOrLater ? 12 : 11,                         // Column M (index 12) or Column L (index 11)
+            volumeFuel: isJuneOrLater ? 14 : 13,                        // Column O (index 14) or Column N (index 13)
           };
 
           let detectedHeaderRowIdx = -1;
 
           if (isIssuedSheet) {
-            // Strictly lock indices/scan for "Issued" sheet as in App.tsx
-            let foundHeaderIdx = -1;
-            const scanRowsLimit = Math.min(rawRows.length, 30);
-            for (let r = 0; r < scanRowsLimit; r++) {
-              const row = rawRows[r];
-              if (!row || !Array.isArray(row)) continue;
-              let hits = 0;
-              row.forEach((cell) => {
-                if (cell === undefined || cell === null) return;
-                const str = String(cell).toLowerCase().trim();
-                if (
-                  str.includes("tanggal") || 
-                  str.includes("unit") || 
-                  str === "kategori" || 
-                  str.includes("hm") || 
-                  str.includes("fuel") ||
-                  str.includes("jam")
-                ) {
-                  hits++;
-                }
-              });
-              if (hits >= 3) {
-                foundHeaderIdx = r;
-                break;
-              }
-            }
-            detectedHeaderRowIdx = foundHeaderIdx;
+            // Header is around row 107-109, data strictly starts at row 110 (index 109)
+            detectedHeaderRowIdx = 108;
           } else {
             // Fallback parser dynamic scanner matching EXACT patterns in App.tsx
             let bestHeaderRowIdx = -1;
@@ -733,12 +1075,13 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
             }
           }
 
-          // Read sheet row by row starting from headers
-          const startIdx = detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0;
-          if (colMap.typeAlat !== -1 && colMap.volumeFuel !== -1) {
+          // Start reading sheet row by row: For "Issued" sheet, strictly start at row 110 (index 109)
+          const startIdx = isIssuedSheet ? 109 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
+          if (colMap.volumeFuel !== -1) {
             sheetsCountParsed++;
-            // Aggregate values for this sheet
+            // Aggregate values for this sheet by Egy Alat and Individual Unit
             const sheetAggregates: Record<string, { totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
+            const unitAggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
 
             for (let r = startIdx; r < rawRows.length; r++) {
               const row = rawRows[r];
@@ -752,38 +1095,66 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
               });
               if (isHeaderRow) continue;
 
-              // Extract vehicule type
-              const typeRaw = colMap.typeAlat !== -1 ? row[colMap.typeAlat] : "";
-              if (!typeRaw) continue;
-              const typeAlat = String(typeRaw).trim();
+              // Extract vehicle ID strictly from Column I (index 8) as requested
+              let idAlat = "";
+              if (row.length > 8 && row[8] !== undefined && row[8] !== null) {
+                const rawColI = String(row[8]).trim();
+                if (rawColI) {
+                  idAlat = rawColI.toUpperCase();
+                }
+              }
+              if (!idAlat && colMap.idAlat !== -1 && colMap.idAlat < row.length && row[colMap.idAlat] !== undefined && row[colMap.idAlat] !== null) {
+                const rawId = String(row[colMap.idAlat]).trim();
+                if (rawId) {
+                  idAlat = rawId.toUpperCase();
+                }
+              }
+
+              // REJECT INVALID UNIT IDS (Decimal numbers, formulas, totals, single chars, dates)
+              if (!idAlat || idAlat.length < 2) continue;
+              if (!isNaN(Number(idAlat))) continue; // Exclude numeric decimals like 0.1226313908
+              if (idAlat.includes(".") && !isNaN(parseFloat(idAlat))) continue;
+              if (idAlat === "C" || idAlat === "A" || idAlat === "B" || idAlat === "D" || idAlat === "TOTAL" || idAlat === "N/A" || idAlat.includes("#REF") || idAlat.includes("DIV/0")) continue;
+              if (idAlat.toLowerCase().includes("tanggal") || idAlat.toLowerCase().includes("unit") || idAlat.toLowerCase().includes("nomor") || idAlat.toLowerCase().includes("operator")) continue;
+
+              const typeRaw = colMap.typeAlat !== -1 && colMap.typeAlat < row.length ? row[colMap.typeAlat] : "";
+              const typeAlat = typeRaw ? String(typeRaw).trim() : "";
               if (typeAlat.toLowerCase().includes("tanggal") || typeAlat.toLowerCase().includes("operator")) continue;
+
+              // Primary Parameter: Egy Alat derived strictly from Equipment ID (Kolom I) prefix patterns
+              const egyAlat = deriveEgy(idAlat, typeAlat);
+              if (!egyAlat || egyAlat === "C" || egyAlat.length < 2) continue;
 
               // Extract volumes and HM
               const volVal = colMap.volumeFuel !== -1 ? parseFloat(row[colMap.volumeFuel]) : 0;
               const prevHmVal = colMap.hmSebelum !== -1 ? parseFloat(row[colMap.hmSebelum]) : 0;
               const currHmVal = colMap.hmSaatIni !== -1 ? parseFloat(row[colMap.hmSaatIni]) : 0;
               
-              // Seharusnya data liter/jam yaitu pengisian fuel dibagi (HM pengisian hari ini dikurangi HM pengisian sebelumnya)
               let hoursVal = currHmVal - prevHmVal;
               let isAnomalyRow = false;
 
               // Validate HM values and running hours
-              if (isNaN(prevHmVal) || isNaN(currHmVal) || prevHmVal < 0 || currHmVal < 0 || hoursVal <= 0) {
-                isAnomalyRow = true;
+              // RENTAL UNIT FILTER:
+              // 1. If prevHmVal is 0 and currHmVal > 100 (odometer dump like 21903 jam), this is a rental unit without previous HM.
+              // 2. If hoursVal > 744 jam (impossible for 1 month / shift) or hoursVal <= 0, it's a rental unit / invalid log.
+              // 3. If ID Alat is FD23252 or rental unit, exclude completely.
+              const cleanIdUpper = idAlat.toUpperCase();
+              if (
+                cleanIdUpper === "FD23252" ||
+                isNaN(prevHmVal) ||
+                isNaN(currHmVal) ||
+                prevHmVal < 0 ||
+                currHmVal < 0 ||
+                hoursVal <= 0 ||
+                hoursVal > 744 ||
+                (prevHmVal === 0 && currHmVal > 100)
+              ) {
                 hoursVal = 0;
-              }
-              const validVol = isNaN(volVal) ? 0 : volVal;
-              if (validVol <= 0) {
                 isAnomalyRow = true;
               }
-
-              // Filter out severe anomalies (unrealistic flow rates, like rate < 3 L/Jam or rate > 120 L/Jam)
-              // to prevent corrupted averages (e.g., from reset HM jump or clerical typos).
-              if (!isAnomalyRow && hoursVal > 0) {
-                const burnRate = validVol / hoursVal;
-                if (burnRate < 3.0 || burnRate > 120.0) {
-                  isAnomalyRow = true;
-                }
+              const validVol = isNaN(volVal) || volVal <= 0 ? 0 : volVal;
+              if (validVol <= 0 || hoursVal <= 0) {
+                isAnomalyRow = true;
               }
 
               // Attempt to scrape month from date cell
@@ -801,25 +1172,41 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                 }
               }
 
-              const groupKey = typeAlat;
+              const groupKey = egyAlat;
               if (!sheetAggregates[groupKey]) {
                 sheetAggregates[groupKey] = { totalVolume: 0, totalHours: 0, count: 0, detectedMonthFromDates: {} };
               }
 
-              // ONLY aggregate valid Operational transactions (where run hour difference and fuel volume are positive)
-              // If we add fuel from zero or negative hour transactions to the numerator but 0 to the denominator,
-              // the overall average fuel burn rate calculation becomes heavily warped and incorrect.
-              if (!isAnomalyRow) {
+              const unitKey = idAlat || `ANON_${egyAlat}`;
+              if (!unitAggregates[unitKey]) {
+                unitAggregates[unitKey] = { idAlat: unitKey, egy: egyAlat, typeAlat: typeAlat || egyAlat, totalVolume: 0, totalHours: 0, count: 0, detectedMonthFromDates: {} };
+              }
+
+              // Aggregate valid operational fuel transactions (exclude rental units with 0 HM)
+              if (!isAnomalyRow && hoursVal > 0) {
                 sheetAggregates[groupKey].totalVolume += validVol;
                 sheetAggregates[groupKey].totalHours += hoursVal;
                 sheetAggregates[groupKey].count += 1;
                 sheetAggregates[groupKey].detectedMonthFromDates[rowMonthName] = (sheetAggregates[groupKey].detectedMonthFromDates[rowMonthName] || 0) + 1;
+
+                unitAggregates[unitKey].totalVolume += validVol;
+                unitAggregates[unitKey].totalHours += hoursVal;
+                unitAggregates[unitKey].count += 1;
+                unitAggregates[unitKey].detectedMonthFromDates[rowMonthName] = (unitAggregates[unitKey].detectedMonthFromDates[rowMonthName] || 0) + 1;
+
+                if (!allUnitAggregates[unitKey]) {
+                  allUnitAggregates[unitKey] = { idAlat: unitKey, egy: egyAlat, typeAlat: typeAlat || egyAlat, totalVolume: 0, totalHours: 0, count: 0, detectedMonthFromDates: {} };
+                }
+                allUnitAggregates[unitKey].totalVolume += validVol;
+                allUnitAggregates[unitKey].totalHours += hoursVal;
+                allUnitAggregates[unitKey].count += 1;
+                allUnitAggregates[unitKey].detectedMonthFromDates[rowMonthName] = (allUnitAggregates[unitKey].detectedMonthFromDates[rowMonthName] || 0) + 1;
               }
             }
 
             // Convert sheetAggregates to data points
-            Object.entries(sheetAggregates).forEach(([typeAlat, val]) => {
-              if (val.totalVolume === 0) return; // skip silent items
+            Object.entries(sheetAggregates).forEach(([egyAlatKey, val]) => {
+              if (val.totalVolume === 0 && val.totalHours === 0) return; // skip silent items
 
               // Determine the final dominant month name for this sheet group
               let bestMonth = selectedMonthForUpload || monthIdentifier;
@@ -835,7 +1222,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
 
               parsedEntries.push({
                 bulan: bestMonth,
-                typeAlat,
+                typeAlat: egyAlatKey, // Primary parameter is Egy
                 totalVolume: Number(val.totalVolume.toFixed(1)),
                 totalHours: Number(val.totalHours.toFixed(1)),
                 recordCount: val.count
@@ -848,101 +1235,123 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           throw new Error("Sistem gagal mengidentifikasi kolom data (Tanggal, Type Alat, Volume, HM) di lembar kerja Anda.");
         }
 
-        // Group and aggregate parsedEntries by (bulan, typeAlat) to avoid any duplicates and resolve mismatches
-        const aggregatePts = (ptsArr: typeof parsedEntries) => {
-          const map: Record<string, typeof ptsArr[0]> = {};
-          ptsArr.forEach(p => {
-            const k = `${p.bulan}__${p.typeAlat}`;
-            if (!map[k]) {
-              map[k] = { ...p };
-            } else {
-              map[k].totalVolume += p.totalVolume;
-              map[k].totalHours += p.totalHours;
-              map[k].recordCount += p.recordCount;
+        // Calculate overall analytics and summaries for pre-commit review
+        const totalValidVol = parsedEntries.reduce((sum, p) => sum + p.totalVolume, 0);
+        const totalValidHrs = parsedEntries.reduce((sum, p) => sum + p.totalHours, 0);
+        const totalValidRecCount = parsedEntries.reduce((sum, p) => sum + p.recordCount, 0);
+        const overallBurn = totalValidHrs > 0 ? Number((totalValidVol / totalValidHrs).toFixed(2)) : 0;
+
+        // Group by Canonical Egy for Master Juli Benchmarking Breakdown
+        const egyGroupMap: Record<string, { totalVol: number; totalHrs: number; count: number; units: Set<string> }> = {};
+        Object.values(allUnitAggregates).forEach(u => {
+          const canonEgy = cleanEgyName(deriveEgy(u.idAlat, u.typeAlat || u.egy));
+          if (!egyGroupMap[canonEgy]) {
+            egyGroupMap[canonEgy] = { totalVol: 0, totalHrs: 0, count: 0, units: new Set() };
+          }
+          egyGroupMap[canonEgy].totalVol += u.totalVolume;
+          egyGroupMap[canonEgy].totalHrs += u.totalHours;
+          egyGroupMap[canonEgy].count += u.count;
+          if (u.idAlat && !u.idAlat.startsWith("ANON_")) {
+            egyGroupMap[canonEgy].units.add(u.idAlat);
+          }
+        });
+
+        const egySummaries: AnalyzedEgySummary[] = Object.entries(egyGroupMap).map(([egyName, val]) => {
+          const burn = val.totalHrs > 0 ? Number((val.totalVol / val.totalHrs).toFixed(2)) : 0;
+          const benchmark = activeEgyPlans[egyName] || MASTER_JULY_BENCHMARKS[egyName] || 15.0;
+          const diff = burn - benchmark;
+          let status: "optimal" | "warning" | "high" | "info" = "optimal";
+          let statusText = "Sesuai Patokan";
+
+          if (burn === 0) {
+            status = "info";
+            statusText = "HM/Volume 0";
+          } else if (diff > 5.0) {
+            status = "high";
+            statusText = "Di Atas Target";
+          } else if (diff > 2.0) {
+            status = "warning";
+            statusText = "Perlu Perhatian";
+          } else {
+            status = "optimal";
+            statusText = "Efisiensi Normal";
+          }
+
+          return {
+            egy: egyName,
+            unitCount: val.units.size > 0 ? val.units.size : 1,
+            units: Array.from(val.units),
+            totalVolume: Number(val.totalVol.toFixed(1)),
+            totalHours: Number(val.totalHrs.toFixed(1)),
+            burnRate: burn,
+            benchmarkRate: benchmark,
+            status,
+            statusText
+          };
+        }).sort((a, b) => b.totalVolume - a.totalVolume);
+
+        // Map Unit-Level Details (strictly operational units with totalHours > 0)
+        const unitDetails: AnalyzedUnitDetail[] = Object.values(allUnitAggregates)
+          .filter(u => u.totalHours > 0)
+          .map(u => {
+            const canonEgy = cleanEgyName(deriveEgy(u.idAlat, u.typeAlat || u.egy));
+            const burn = u.totalHours > 0 ? Number((u.totalVolume / u.totalHours).toFixed(2)) : 0;
+            return {
+              idAlat: u.idAlat,
+              egy: canonEgy,
+              typeAlat: u.typeAlat,
+              totalVolume: Number(u.totalVolume.toFixed(1)),
+              totalHours: Number(u.totalHours.toFixed(1)),
+              burnRate: burn,
+              recordCount: u.count,
+              isKnownBenchmark: !!MASTER_JULY_BENCHMARKS[canonEgy]
+            };
+          }).sort((a, b) => b.totalVolume - a.totalVolume);
+
+        // Find dominant month from entries
+        let dominantMonth = selectedMonthForUpload || "Juli";
+        if (!selectedMonthForUpload) {
+          const monthFreq: Record<string, number> = {};
+          parsedEntries.forEach(p => {
+            monthFreq[p.bulan] = (monthFreq[p.bulan] || 0) + p.recordCount;
+          });
+          let maxFreq = 0;
+          Object.entries(monthFreq).forEach(([mName, freq]) => {
+            if (freq > maxFreq) {
+              maxFreq = freq;
+              dominantMonth = mName;
             }
           });
-          return Object.values(map).map(p => ({
-            ...p,
-            totalVolume: Number(p.totalVolume.toFixed(1)),
-            totalHours: Number(p.totalHours.toFixed(1))
-          }));
+        }
+
+        const stagingResult: AnalyzedUploadResult = {
+          fileName: file.name,
+          fileSize: file.size,
+          sheetCount: sheetsCountParsed || workbook.SheetNames.length,
+          sheetNames: workbook.SheetNames,
+          detectedMonth: dominantMonth,
+          detectedYear: 2026,
+          totalRecords: totalValidRecCount,
+          validRecords: totalValidRecCount,
+          anomalyRecords: 0,
+          totalVolume: Number(totalValidVol.toFixed(1)),
+          totalHours: Number(totalValidHrs.toFixed(1)),
+          avgBurnRate: overallBurn,
+          egySummaries,
+          unitDetails,
+          rawPayload: {
+            parsedEntries,
+            unitAggregates: Object.values(allUnitAggregates)
+          }
         };
 
-        const aggregatedParsed = aggregatePts(parsedEntries);
-
-        // Persist each month's data to Firebase Firestore backend
-        const monthsInParsed = Array.from(new Set(aggregatedParsed.map(p => p.bulan)));
-        for (const mName of monthsInParsed) {
-          const mPts = aggregatedParsed.filter(p => p.bulan === mName);
-          const mTotalVol = mPts.reduce((sum, p) => sum + p.totalVolume, 0);
-          const mTotalHrs = mPts.reduce((sum, p) => sum + p.totalHours, 0);
-          const mRecordCount = mPts.reduce((sum, p) => sum + p.recordCount, 0);
-          const mIdx = getMonthFromText(mName);
-          
-          const reportPayload: MonthlyReportData = {
-            id: `2026_${mName}`,
-            bulan: mName,
-            monthIndex: mIdx !== -1 ? mIdx : 0,
-            year: 2026,
-            fileName: file.name,
-            uploadedAt: new Date().toISOString(),
-            totalVolume: Number(mTotalVol.toFixed(1)),
-            totalHours: Number(mTotalHrs.toFixed(1)),
-            recordCount: mRecordCount,
-            avgBurnRate: mTotalHrs > 0 ? Number((mTotalVol / mTotalHrs).toFixed(2)) : 0,
-            typeSummaries: mPts.map(p => ({
-              typeAlat: p.typeAlat,
-              totalVolume: p.totalVolume,
-              totalHours: p.totalHours,
-              recordCount: p.recordCount,
-              burnRate: p.totalHours > 0 ? Number((p.totalVolume / p.totalHours).toFixed(2)) : 0
-            }))
-          };
-          
-          try {
-            await saveMonthlyReportToFirestore(reportPayload);
-          } catch (cloudErr) {
-            console.warn("Penyimpanan Firestore backend notice:", cloudErr);
-          }
-        }
-
-        let nextPts: typeof dataPoints = [];
-        let nextMonths: string[] = [];
-
-        if (selectedMonthForUpload) {
-          const clean = dataPoints.filter(d => d.bulan !== selectedMonthForUpload);
-          nextPts = aggregatePts([...clean, ...aggregatedParsed]);
-          nextMonths = uploadedMonths.includes(selectedMonthForUpload)
-            ? uploadedMonths
-            : [...uploadedMonths, selectedMonthForUpload];
-          
-          setDataPoints(nextPts);
-          setUploadedMonths(nextMonths);
-          saveLocalData("yearly_data_points", nextPts);
-          saveLocalData("yearly_uploaded_months", nextMonths);
-
-          setFeedback({
-            type: "success",
-            message: `Sukses mengunggah & menyimpan data bulan ${selectedMonthForUpload} ke Cloud Firebase (fuel-wbs)! Terdeteksi ${aggregatedParsed.length} jenis alat berat.`
-          });
-        } else {
-          const parsedMonths = Array.from(new Set(aggregatedParsed.map(e => e.bulan)));
-          const clean = dataPoints.filter(d => !parsedMonths.includes(d.bulan));
-          nextPts = aggregatePts([...clean, ...aggregatedParsed]);
-          nextMonths = Array.from(new Set([...uploadedMonths, ...parsedMonths]));
-
-          setDataPoints(nextPts);
-          setUploadedMonths(nextMonths);
-          saveLocalData("yearly_data_points", nextPts);
-          saveLocalData("yearly_uploaded_months", nextMonths);
-
-          setFeedback({
-            type: "success",
-            message: `Sukses menganalisa & menyimpan ${sheetsCountParsed} sheet data bulanan ke Cloud Firebase! Melacak ${aggregatedParsed.length} kategori tipe alat.`
-          });
-        }
-
-        setSelectedHighlightType("SEMUA");
+        // Open Analysis Modal for verification before committing
+        setAnalysisStagingData(stagingResult);
+        setIsAnalysisModalOpen(true);
+        setFeedback({
+          type: "success",
+          message: `File "${file.name}" berhasil dianalisa (${unitDetails.length} unit terdeteksi)! Silakan periksa hasil validasi pada pop-up sebelum diterapkan ke Yearly Review.`
+        });
       } catch (err: any) {
         setFeedback({
           type: "error",
@@ -950,12 +1359,123 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
         });
       } finally {
         setIsProcessing(false);
-        // Clear input so same file can be selection-triggered again
         if (fileInputRef.current) fileInputRef.current.value = "";
       }
     };
 
     reader.readAsArrayBuffer(file);
+  };
+
+  // Callback to commit and apply the staged analyzed data once user confirms
+  const handleConfirmAnalysis = async (confirmedMonth: string, stagingData: AnalyzedUploadResult) => {
+    setIsApplyingAnalysis(true);
+    try {
+      const rawPayload = stagingData.rawPayload;
+      if (!rawPayload) return;
+
+      const parsedEntries = (rawPayload.parsedEntries as Array<{
+        bulan: string;
+        typeAlat: string;
+        totalVolume: number;
+        totalHours: number;
+        recordCount: number;
+      }>).map(p => ({
+        ...p,
+        bulan: confirmedMonth // Align all parsed entries to the confirmed month
+      }));
+
+      // Group and aggregate parsedEntries by (bulan, typeAlat) to avoid duplicates
+      const map: Record<string, typeof parsedEntries[0]> = {};
+      parsedEntries.forEach(p => {
+        const k = `${p.bulan}__${p.typeAlat}`;
+        if (!map[k]) {
+          map[k] = { ...p };
+        } else {
+          map[k].totalVolume += p.totalVolume;
+          map[k].totalHours += p.totalHours;
+          map[k].recordCount += p.recordCount;
+        }
+      });
+
+      const aggregatedParsed = Object.values(map).map(p => ({
+        ...p,
+        totalVolume: Number(p.totalVolume.toFixed(1)),
+        totalHours: Number(p.totalHours.toFixed(1))
+      }));
+
+      // Prepare Firestore payload
+      const mTotalVol = aggregatedParsed.reduce((sum, p) => sum + p.totalVolume, 0);
+      const mTotalHrs = aggregatedParsed.reduce((sum, p) => sum + p.totalHours, 0);
+      const mRecordCount = aggregatedParsed.reduce((sum, p) => sum + p.recordCount, 0);
+      const mIdx = getMonthFromText(confirmedMonth);
+
+      const unitSummaries = (stagingData.unitDetails || []).map(u => ({
+        idAlat: u.idAlat,
+        egy: u.egy,
+        typeAlat: u.typeAlat,
+        totalVolume: u.totalVolume,
+        totalHours: u.totalHours,
+        burnRate: u.burnRate,
+        recordCount: u.recordCount
+      }));
+
+      const reportPayload: MonthlyReportData = {
+        id: `2026_${confirmedMonth}`,
+        bulan: confirmedMonth,
+        monthIndex: mIdx !== -1 ? mIdx : 0,
+        year: 2026,
+        fileName: stagingData.fileName,
+        uploadedAt: new Date().toISOString(),
+        totalVolume: Number(mTotalVol.toFixed(1)),
+        totalHours: Number(mTotalHrs.toFixed(1)),
+        recordCount: mRecordCount,
+        avgBurnRate: mTotalHrs > 0 ? Number((mTotalVol / mTotalHrs).toFixed(2)) : 0,
+        typeSummaries: aggregatedParsed.map(p => ({
+          egy: p.typeAlat,
+          typeAlat: p.typeAlat,
+          totalVolume: p.totalVolume,
+          totalHours: p.totalHours,
+          recordCount: p.recordCount,
+          burnRate: p.totalHours > 0 ? Number((p.totalVolume / p.totalHours).toFixed(2)) : 0
+        })),
+        unitSummaries
+      };
+
+      try {
+        await saveMonthlyReportToFirestore(reportPayload);
+      } catch (cloudErr) {
+        console.warn("Penyimpanan Firestore backend notice:", cloudErr);
+      }
+
+      // Merge into local state & storage
+      const clean = dataPoints.filter(d => d.bulan !== confirmedMonth);
+      const nextPts = [...clean, ...aggregatedParsed];
+      const nextMonths = uploadedMonths.includes(confirmedMonth)
+        ? uploadedMonths
+        : [...uploadedMonths, confirmedMonth];
+
+      setDataPoints(nextPts);
+      setUploadedMonths(nextMonths);
+      saveLocalData("yearly_data_points", nextPts);
+      saveLocalData("yearly_uploaded_months", nextMonths);
+
+      setIsAnalysisModalOpen(false);
+      setAnalysisStagingData(null);
+      setSelectedMonthForUpload(null);
+
+      setFeedback({
+        type: "success",
+        message: `Data bulan ${confirmedMonth} berhasil divalidasi dan diterapkan ke Yearly Review! (${aggregatedParsed.length} kategori tipe alat tersimpan di Cloud Firestore).`
+      });
+    } catch (err: any) {
+      setFeedback({
+        type: "error",
+        message: `Gagal menerapkan data hasil analisa: ${err.message || "Periksa kesesuaian data."}`
+      });
+    } finally {
+      setIsApplyingAnalysis(false);
+      if (fileInputRef.current) fileInputRef.current.value = "";
+    }
   };
 
   const triggerUploadFile = () => {
@@ -1039,33 +1559,33 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
         <div className="absolute bottom-0 left-1/3 w-60 h-60 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -mb-10"></div>
 
         <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div className="space-y-2">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="inline-flex items-center gap-1.5 text-[10px] uppercase font-black tracking-widest text-[#4682B4] bg-[#2E4A62] px-3 py-1.5 rounded-full border border-blue-500/20 shadow-sm shadow-blue-900/10">
-                <Calendar className="w-3.5 h-3.5" />
-                <span>Yearly Review Module</span>
-              </span>
-
-              <span className={`inline-flex items-center gap-1 text-[10px] font-bold px-2.5 py-1 rounded-full border ${
-                isCloudConnected 
-                  ? "bg-amber-500/10 text-amber-300 border-amber-500/30" 
-                  : "bg-slate-700/50 text-slate-400 border-slate-600"
-              }`}>
-                <Database className="w-3 h-3 text-amber-400" />
-                <span>Firebase Backend: fuel-wbs</span>
-                {isSyncingCloud && <RefreshCw className="w-2.5 h-2.5 animate-spin text-amber-300 ml-1" />}
-              </span>
-            </div>
-
+          <div>
             <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              Analisa Fuel Burn Yearly
+              FUEL BURN YEARLY REVIEW
             </h2>
-            <p className="text-xs sm:text-sm text-slate-300 max-w-2xl font-medium leading-relaxed">
-              Menyajikan data fuel burn sesuai kategori alat berat yang tersimpan otomatis di Firebase Firestore.
-            </p>
           </div>
 
           <div className="flex flex-wrap items-center gap-3 shrink-0">
+            <button
+              onClick={triggerUploadFile}
+              disabled={isProcessing}
+              className="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-emerald-400/30"
+              title="Unggah dan analisa file Excel baru sebelum ditampilkan & disimpan ke Yearly Review"
+            >
+              <Upload className="w-4 h-4 text-emerald-100" />
+              <span>Upload & Analisa File</span>
+            </button>
+
+            <button
+              onClick={handleSyncToJulyBenchmark}
+              disabled={isProcessing}
+              className="text-xs bg-[#4682B4] hover:bg-[#3b6f99] disabled:opacity-50 text-white font-black px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-blue-400/30"
+              title="Selaraskan data dari bulan Januari-Juni sesuai Egy patokan bulan Juli"
+            >
+              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
+              <span>Sesuaikan ke Egy Juli</span>
+            </button>
+
             <button
               onClick={handleManualCloudRefresh}
               disabled={isSyncingCloud}
@@ -1099,20 +1619,17 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
 
         {/* Feedback Alert Toast inside card for tidy layout */}
         {feedback.message && (
-          <div className={`mt-5 p-3.5 rounded-xl text-xs flex items-start gap-2.5 max-w-4xl border ${
+          <div className={`mt-5 p-3.5 rounded-xl text-xs flex items-center gap-2.5 max-w-4xl border ${
             feedback.type === "success" 
               ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-300"
               : "bg-rose-500/10 border-rose-500/25 text-rose-300"
           }`}>
             {feedback.type === "success" ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-405 shrink-0 mt-0.5 animate-pulse" />
+              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
             ) : (
-              <AlertTriangle className="w-4 h-4 text-rose-405 shrink-0 mt-0.5 animate-bounce" />
+              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
             )}
-            <div>
-              <p className="font-bold">{feedback.type === "success" ? "Analisis Sukses" : "Peringatan Sistem"}</p>
-              <p className="mt-0.5 text-[11px] opacity-90 leading-relaxed font-mono">{feedback.message}</p>
-            </div>
+            <p className="font-semibold text-xs leading-normal">{feedback.message}</p>
           </div>
         )}
       </div>
@@ -1256,11 +1773,11 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
         </div>
       </div>
 
-      {/* Left-Right Split: Graphic Dashboard (Left) & Highlight Pivot Grid (Right) */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
+      {/* Stacked Layout: Graphic Dashboard (Top) & Highlight Pivot Grid (Bottom) */}
+      <div className="space-y-6">
         
-        {/* CHART PORT (lg:col-span-8) */}
-        <div className="lg:col-span-8 bg-white border border-slate-200 shadow-sm rounded-xl p-5 space-y-5">
+        {/* CHART CARD (Full-Width) */}
+        <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 sm:p-6 space-y-5">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
             <div className="flex items-center gap-2">
               <BarChart2 className="w-5 h-5 text-[#4682B4]" />
@@ -1313,7 +1830,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                 id="equipment-type-dropdown"
                 value={selectedHighlightType}
                 onChange={(e) => setSelectedHighlightType(e.target.value)}
-                className="text-xs bg-white border border-slate-250 text-slate-705 px-3.5 py-2 pr-9 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4682B4] font-bold cursor-pointer transition appearance-none min-w-[200px]"
+                className="text-xs bg-white border border-slate-250 text-slate-700 px-3.5 py-2 pr-9 rounded-lg focus:outline-none focus:ring-2 focus:ring-[#4682B4] font-bold cursor-pointer transition appearance-none min-w-[200px]"
               >
                 <option value="SEMUA">★ Tampilkan Semua Kategori</option>
                 {uniqueEquipmentTypes.map((t) => (
@@ -1342,7 +1859,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                 <p className="text-[10px] text-slate-400 mt-1">Harap pastikan workbook Excel Anda berisi minimal 2 bulan/sheet pengisian.</p>
               </div>
             ) : (
-              <svg viewBox="0 0 750 300" className="w-full h-auto overflow-visible select-none">
+              <svg viewBox="0 0 850 300" className="w-full h-auto overflow-visible select-none">
                 {/* Horizontal Grid lines */}
                 {[0, 0.25, 0.5, 0.75, 1].map((p, i) => {
                   const yVal = 250 - p * 200;
@@ -1355,7 +1872,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                       <line
                         x1="55"
                         y1={yVal}
-                        x2="720"
+                        x2="820"
                         y2={yVal}
                         stroke="#E2E8F0"
                         strokeWidth="1"
@@ -1375,7 +1892,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
 
                 {/* X Axis Month Labels */}
                 {currentMonths.map((m, mIdx) => {
-                  const xVal = 80 + mIdx * ((720 - 80) / (currentMonths.length - 1));
+                  const xVal = 80 + mIdx * ((820 - 80) / (currentMonths.length - 1));
                   return (
                     <g key={m}>
                       {/* Vertical line helper */}
@@ -1408,7 +1925,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                   // Extract points for this type
                   const points = currentMonths.map((m, mIdx) => {
                     const entry = pivotTableData[t]?.[m];
-                    const xVal = 80 + mIdx * ((720 - 80) / (currentMonths.length - 1));
+                    const xVal = 80 + mIdx * ((820 - 80) / (currentMonths.length - 1));
 
                     let val = 0;
                     if (entry) {
@@ -1508,8 +2025,8 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           </div>
         </div>
 
-        {/* COMPARISON PIVOT GRID (lg:col-span-4) */}
-        <div className="lg:col-span-4 bg-white border border-slate-200 shadow-sm rounded-xl p-5 flex flex-col justify-between space-y-4">
+        {/* COMPARISON PIVOT GRID CARD (Full-Width, placed below chart) */}
+        <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 sm:p-6 space-y-4">
           <div className="space-y-1 pb-1 border-b border-slate-100">
             <div className="flex items-center gap-2">
               <Table className="w-5 h-5 text-slate-700" />
@@ -1520,26 +2037,27 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
 
           {/* Table container */}
           <div className="overflow-x-auto border border-slate-100 rounded-lg">
-            <table className="w-full text-left text-[11px] font-sans border-collapse">
+            <table className="w-full text-left text-xs font-sans border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-slate-600 font-bold uppercase tracking-wider">
-                  <th className="p-2.5 font-extrabold sticky left-0 bg-slate-50 border-r border-slate-100">Tipe Alat</th>
+                  <th className="p-3 font-extrabold sticky left-0 bg-slate-50 border-r border-slate-100">Egy Alat (Equipment)</th>
                   {currentMonths.map(m => (
-                    <th key={m} className="p-2.5 text-center font-extrabold whitespace-nowrap min-w-[75px]">{m.substring(0, 3)}</th>
+                    <th key={m} className="p-3 text-center font-extrabold whitespace-nowrap min-w-[85px]">{m}</th>
                   ))}
-                  <th className="p-2.5 text-center font-extrabold bg-slate-100/50">Plan</th>
+                  <th className="p-3 text-center font-extrabold bg-slate-100/50 min-w-[80px]">Plan</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
                 {uniqueEquipmentTypes
                   .filter((t) => selectedHighlightType === "SEMUA" || selectedHighlightType === t)
                   .map((type) => {
-                    const planValue = DEFAULT_TYPE_PLANS[type] || 0;
+                    const cleanType = cleanEgyName(type).toUpperCase();
+                    const planValue = activeEgyPlans[cleanType] || activeEgyPlans[type] || DEFAULT_TYPE_PLANS[cleanType] || DEFAULT_TYPE_PLANS[type] || 0;
                   
                   return (
                     <tr key={type} className="hover:bg-slate-50/50 transition">
                       {/* Name Col */}
-                      <td className="p-2.5 font-bold text-slate-800 sticky left-0 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] whitespace-nowrap">
+                      <td className="p-3 font-bold text-slate-800 sticky left-0 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] whitespace-nowrap">
                         {type}
                       </td>
 
@@ -1564,7 +2082,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                         return (
                           <td
                             key={month}
-                            className={`p-2.5 text-center font-mono ${
+                            className={`p-3 text-center font-mono ${
                               isOverPlan 
                                 ? "bg-rose-50 text-rose-600 font-extrabold" 
                                 : cell && cell.count > 0 && activeAnalysisMetric === "burnRate"
@@ -1578,7 +2096,7 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
                       })}
 
                       {/* Plan Col */}
-                      <td className="p-2.5 text-center font-mono font-bold bg-slate-100/30 text-slate-500">
+                      <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-500">
                         {planValue > 0 ? planValue : "-"}
                       </td>
                     </tr>
@@ -1773,6 +2291,36 @@ export default function YearlyReview({ onBackToDashboard }: YearlyReviewProps) {
           })}
         </div>
       </div>
+
+      {/* MODAL ANALISA & VALIDASI PRA-UNGGAH (PRE-COMMIT ANALYSIS MODAL) */}
+      <UploadAnalysisModal
+        isOpen={isAnalysisModalOpen}
+        analysisData={analysisStagingData}
+        targetContext="yearly"
+        isApplying={isApplyingAnalysis}
+        onClose={() => {
+          setIsAnalysisModalOpen(false);
+          setAnalysisStagingData(null);
+          setSelectedMonthForUpload(null);
+        }}
+        onConfirm={handleConfirmAnalysis}
+      />
+
+      {/* MODAL PENGATURAN TARGET PLAN FUEL BURN PER EGY */}
+      <EgyPlanManagerModal
+        isOpen={isInternalPlanModalOpen}
+        onClose={() => setIsInternalPlanModalOpen(false)}
+        currentPlans={activeEgyPlans}
+        onSavePlans={async (updated) => {
+          setInternalEgyPlans(updated);
+          await saveStoredEgyPlans(updated);
+          setFeedback({
+            type: "success",
+            message: "Target Plan Fuel Burn per Jenis Egy berhasil diperbarui dan disinkronkan!"
+          });
+        }}
+        availableEgysInDataset={uniqueEquipmentTypes}
+      />
 
     </div>
   );
