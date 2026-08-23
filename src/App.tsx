@@ -81,6 +81,9 @@ const INITIAL_PLANS: Record<string, { idAlat: string; egy: string; typeAlat: str
   "FT23001": { idAlat: "FT23001", egy: "FUEL TRUCK", typeAlat: "DUTRO 136 HD", planFuelBurn: 7.0 },
   "FL23001": { idAlat: "FL23001", egy: "FORKLIFT", typeAlat: "KOMATSU FD150E - 8", planFuelBurn: 6.0 },
   "WT23102": { idAlat: "WT23102", egy: "WATER TRUCK", typeAlat: "DUTRO 136 HD", planFuelBurn: 6.0 },
+  "WT23001": { idAlat: "WT23001", egy: "WATER TRUCK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 6.0 },
+  "WT23002": { idAlat: "WT23002", egy: "WATER TRUCK", typeAlat: "HINO 500 (FM280JD)", planFuelBurn: 6.0 },
+  "WT23003": { idAlat: "WT23003", egy: "WATER TRUCK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 6.0 },
   "RS23003": { idAlat: "RS23003", egy: "REACH STACKER", typeAlat: "KONECRANE 45T", planFuelBurn: 12.5 },
   "FD23001": { idAlat: "FD23001", egy: "FLAT DECK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 7.0 },
   "FD23209": { idAlat: "FD23209", egy: "FLAT DECK", typeAlat: "HINO 500 (FM260JD)", planFuelBurn: 7.0 },
@@ -227,6 +230,19 @@ export default function App() {
   }, []);
 
   // Real-time Firestore Active Dataset synchronization & automatic restoration
+  useEffect(() => {
+    // Dynamic browser tab favicon & title ensure
+    document.title = "DASHBOARD FUEL ANALYSIS PT. WBS";
+    const faviconUrl = "https://res.cloudinary.com/dgjnlxf69/image/upload/v1787452149/Logo_Fuel_Monitor_uipgcq.png";
+    let iconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
+    if (!iconLink) {
+      iconLink = document.createElement("link");
+      iconLink.rel = "icon";
+      document.head.appendChild(iconLink);
+    }
+    iconLink.href = faviconUrl;
+  }, []);
+
   useEffect(() => {
     let isInitialLoad = true;
     const unsubscribe = subscribeToActiveDataset(
@@ -1753,8 +1769,8 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-inner overflow-hidden border border-[#334155] p-1 shrink-0">
               <img 
-                src="https://res.cloudinary.com/dgjnlxf69/image/upload/f_auto,q_auto/Logo_WBS_akrioo" 
-                alt="Logo WBS" 
+                src="https://res.cloudinary.com/dgjnlxf69/image/upload/v1787452149/Logo_Fuel_Monitor_uipgcq.png" 
+                alt="Logo Fuel Monitor PT. WBS" 
                 className="w-8 h-8 object-contain" 
                 referrerPolicy="no-referrer"
               />

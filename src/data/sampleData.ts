@@ -121,50 +121,78 @@ export function cleanEgyName(name: string): string {
   }
   const upper = clean.toUpperCase();
 
-  // Canonical mapping for equipment models to their standard Egy classification
-  if (upper.includes("CS 11") || upper.includes("CS11") || upper.includes("COMPACTOR") || upper.includes("VIBRO") || upper.includes("BOMAG") || upper.includes("CATERPILAR CS") || upper.includes("CATERPILLAR CS")) {
-    return "COMPACTOR";
-  }
-  if (upper.includes("FD150") || upper.includes("FORKLIFT") || upper.startsWith("FORK")) {
-    return "FORKLIFT";
-  }
-  if (upper.includes("FLAT DECK") || upper.includes("FLATDECK")) {
+  // 1. Flat Deck (FD prefixes or FLAT DECK / FLAT name) - MUST BE CHECKED BEFORE FORKLIFT!
+  if (upper.includes("FLAT DECK") || upper.includes("FLATDECK") || upper.startsWith("FLAT") || upper.startsWith("FD")) {
     return "FLAT DECK";
   }
-  if (upper.includes("D8T") || upper.includes("D85") || upper.includes("BULLDOZER") || upper.includes("DOZER")) {
+
+  // 2. Forklift (FL prefixes or FORKLIFT / FORK name, excluding FLAT)
+  if (upper.includes("FORKLIFT") || upper.startsWith("FORK") || (upper.startsWith("FL") && !upper.startsWith("FLAT")) || upper.includes("KOMATSU FD150") || upper.includes("FD150E")) {
+    return "FORKLIFT";
+  }
+
+  // 3. Compactor
+  if (upper.includes("CS 11") || upper.includes("CS11") || upper.includes("COMPACTOR") || upper.includes("VIBRO") || upper.includes("BOMAG") || upper.includes("CATERPILAR CS") || upper.includes("CATERPILLAR CS") || upper.startsWith("CP") || upper.startsWith("CS") || upper.startsWith("VB")) {
+    return "COMPACTOR";
+  }
+
+  // 4. Bulldozer
+  if (upper.includes("D8T") || upper.includes("D85") || upper.includes("BULLDOZER") || upper.includes("DOZER") || upper.startsWith("DZ") || upper.startsWith("BD") || upper.startsWith("BULL")) {
     return "BULLDOZER";
   }
-  if (upper.includes("GD 535") || upper.includes("GD535") || upper.includes("GD 511") || upper.includes("GD511") || upper.includes("MOTOR GRADER") || upper.includes("GRADER")) {
+
+  // 5. Motor Grader
+  if (upper.includes("GD 535") || upper.includes("GD535") || upper.includes("GD 511") || upper.includes("GD511") || upper.includes("MOTOR GRADER") || upper.includes("GRADER") || upper.startsWith("GD") || upper.startsWith("MG") || upper.startsWith("GRAD")) {
     return "MOTOR GRADER";
   }
-  if (upper.includes("WA 500") || upper.includes("WA500") || upper.includes("980 NG") || upper.includes("980NG") || upper.includes("WHEEL LOADER") || upper.includes("LOADER")) {
-    return "WHEEL LOADER";
-  }
-  if (upper.includes("PC 210") || upper.includes("PC210") || upper.includes("320 GC") || upper.includes("320GC") || upper.includes("PC 495") || upper.includes("PC495") || upper.includes("EXCAVATOR") || upper.includes("EXCA")) {
-    return "EXCAVATOR";
-  }
-  if (upper.includes("FM260") || upper.includes("FM280") || upper.includes("HD785") || upper.includes("DUMP TRUCK")) {
-    return "DUMP TRUCK";
-  }
-  if (upper.includes("CRANE TRUCK") || (upper.includes("CRANE") && !upper.includes("KONECRANE"))) {
-    return "CRANE TRUCK";
-  }
-  if (upper.includes("KONECRANE") || upper.includes("REACH STACKER") || upper.includes("45T")) {
-    return "REACH STACKER";
-  }
-  if (upper.includes("TOWER LAMP") || upper.includes("TOWERLAMP")) {
-    return "TOWER LAMP";
-  }
-  if (upper.includes("LIGHT VEHICLE") || upper.includes("INNOVA") || upper.includes("HILUX") || upper.includes("TRITON")) {
-    return "LIGHT VEHICLE";
-  }
-  if (upper.includes("WATER TRUCK") || upper.includes("WATER")) {
+
+  // 6. Water Truck (MUST BE CHECKED BEFORE WHEEL LOADER to prevent 'WA' prefix collision with 'WATER')
+  if (upper.includes("WATER TRUCK") || upper.includes("WATER") || upper.startsWith("WT") || upper.startsWith("WR")) {
     return "WATER TRUCK";
   }
-  if (upper.includes("GENSET")) {
+
+  // 7. Wheel Loader (WL / WA500 / CAT 980 / LOADER, strictly excluding WATER)
+  if (upper.includes("WA 500") || upper.includes("WA500") || upper.includes("980 NG") || upper.includes("980NG") || upper.includes("CAT 980") || upper.includes("WHEEL LOADER") || upper.includes("LOADER") || upper.startsWith("WL") || (upper.startsWith("WA") && !upper.startsWith("WAT")) || upper.startsWith("LOAD")) {
+    return "WHEEL LOADER";
+  }
+
+  // 8. Excavator
+  if (upper.includes("PC 210") || upper.includes("PC210") || upper.includes("320 GC") || upper.includes("320GC") || upper.includes("PC 495") || upper.includes("PC495") || upper.includes("EXCAVATOR") || upper.includes("EXCA") || upper.startsWith("EX") || upper.startsWith("PC") || upper.startsWith("HY")) {
+    return "EXCAVATOR";
+  }
+
+  // 9. Dump Truck
+  if (upper.includes("FM260") || upper.includes("FM280") || upper.includes("HD785") || upper.includes("DUMP TRUCK") || upper.startsWith("DT") || upper.startsWith("HD")) {
+    return "DUMP TRUCK";
+  }
+
+  // 10. Crane Truck
+  if (upper.includes("CRANE TRUCK") || (upper.includes("CRANE") && !upper.includes("KONECRANE")) || upper.startsWith("CT")) {
+    return "CRANE TRUCK";
+  }
+
+  // 11. Reach Stacker
+  if (upper.includes("KONECRANE") || upper.includes("REACH STACKER") || upper.includes("45T") || upper.startsWith("RS") || upper.startsWith("KC")) {
+    return "REACH STACKER";
+  }
+
+  // 12. Tower Lamp
+  if (upper.includes("TOWER LAMP") || upper.includes("TOWERLAMP") || upper.startsWith("TL")) {
+    return "TOWER LAMP";
+  }
+
+  // 13. Light Vehicle
+  if (upper.includes("LIGHT VEHICLE") || upper.includes("INNOVA") || upper.includes("HILUX") || upper.includes("TRITON") || upper.startsWith("LV")) {
+    return "LIGHT VEHICLE";
+  }
+
+  // 14. Genset
+  if (upper.includes("GENSET") || upper.startsWith("GS") || upper.startsWith("GEN")) {
     return "GENSET";
   }
-  if (upper.includes("FUEL TRUCK") || upper.includes("DUTRO")) {
+
+  // 15. Fuel Truck
+  if (upper.includes("FUEL TRUCK") || upper.includes("DUTRO") || upper.startsWith("FT") || upper.startsWith("FUEL")) {
     return "FUEL TRUCK";
   }
 
@@ -239,20 +267,35 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "FT23001": { egy: "FUEL TRUCK", type: "DUTRO 136 HD" },
   "FT-01": { egy: "FUEL TRUCK", type: "DUTRO 136 HD" },
 
-  // Forklift & Heavy Lifting
+  // Forklift & Heavy Lifting (FL... is strictly FORKLIFT)
   "FL23001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL23002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL15001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL15002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL-150-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL-150-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FORKLIFT-15T": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FORKLIFT": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "KOMATSU FD150E - 8": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
 
-  // Water Truck
-  "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WR23002": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  // Water Truck (WT, WR, WATER)
+  "WT23001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23002": { egy: "WATER TRUCK", type: "HINO 500 (FM280JD)" },
+  "WT23003": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23004": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23005": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23006": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23007": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23008": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23009": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WT-01": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WT-02": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WR23002": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WATER TRUCK": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
 
   // Reach Stacker
   "RS23003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
@@ -301,6 +344,17 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "FD23021": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23022": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23023": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15001": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15002": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15003": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15004": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15008": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15014": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15024": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15032": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD15035": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD-01": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FLAT DECK": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
 
   // Motor Graders
   "GRAD-GD511-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
@@ -384,11 +438,19 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   // 1. PRIMARY ASSESSMENT: Match Equipment ID patterns (Nomor Equipment)
   if (idStr) {
     // Flat Deck: e.g. FD23001, FD23002, FD23209, FD-01, FD15035, FD15004, FD15008, FD15014, FD15032, FD15024, FD15003, FD...
-    if (idStr.startsWith("FD")) {
+    if (idStr.startsWith("FD") || idStr.startsWith("FLAT") || idStr.includes("FLAT DECK") || idStr.includes("FLATDECK")) {
       return "FLAT DECK";
     }
-    // Wheel Loader: e.g. WL23001, WL23002, WA-500, LOAD-WA500
-    if (idStr.startsWith("WL") || idStr.startsWith("WA") || idStr.startsWith("LOAD")) {
+    // Forklift: e.g. FL23001, FL23002, FL15001, FL-01, FL-150-01, FORKLIFT (strictly exclude FLAT)
+    if ((idStr.startsWith("FL") && !idStr.startsWith("FLAT")) || idStr.startsWith("FORKLIFT") || idStr.startsWith("FORK") || idStr.includes("FORKLIFT")) {
+      return "FORKLIFT";
+    }
+    // Water Truck: e.g. WR23001, WT23001, WT23002, WT23003, WT23102, WT-01, WATER-01
+    if (idStr.startsWith("WR") || idStr.startsWith("WT") || idStr.startsWith("WATER") || idStr.includes("WATER TRUCK") || idStr.includes("WATERTRUCK")) {
+      return "WATER TRUCK";
+    }
+    // Wheel Loader: e.g. WL23001, WL23002, WA-500, LOAD-WA500 (strictly excluding WATER)
+    if (idStr.startsWith("WL") || (idStr.startsWith("WA") && !idStr.startsWith("WAT")) || idStr.startsWith("LOAD")) {
       return "WHEEL LOADER";
     }
     // Dump Truck: e.g. DT23001, DT-HD785, HN-260, HN-280, DT-01
@@ -398,10 +460,6 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
     // Excavator: e.g. EX23001, EX23203, PC-210, HY-495, EXC-PC200
     if (idStr.startsWith("EX") || idStr.startsWith("PC") || idStr.startsWith("HY") || idStr.startsWith("EXC")) {
       return "EXCAVATOR";
-    }
-    // Water Truck: e.g. WR23001, WT23102, WT-01, WATER-01
-    if (idStr.startsWith("WR") || idStr.startsWith("WT") || idStr.startsWith("WATER")) {
-      return "WATER TRUCK";
     }
     // Bulldozer: e.g. DZ23001, BD-01, BULL-D85, DOZER
     if (idStr.startsWith("DZ") || idStr.startsWith("BD") || idStr.startsWith("BULL") || idStr.startsWith("DOZER")) {
@@ -414,10 +472,6 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
     // Fuel Truck: e.g. FT23001, FT-01, FUEL-01
     if (idStr.startsWith("FT") || idStr.startsWith("FUEL")) {
       return "FUEL TRUCK";
-    }
-    // Forklift: e.g. FL23001, FL-01, FL-150-01, FORKLIFT
-    if (idStr.startsWith("FL") || idStr.startsWith("FORKLIFT") || idStr.startsWith("FORK")) {
-      return "FORKLIFT";
     }
     // Reach Stacker: e.g. RS23003, RS-01, KC-45T, KONECRANE
     if (idStr.startsWith("RS") || idStr.startsWith("KC") || idStr.startsWith("KONECRANE")) {
@@ -457,8 +511,11 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   }
 
   // 4. Match type descriptions if ID didn't match
-  if (typeUpper.includes("FLAT DECK") || typeUpper.includes("FLATDECK")) {
+  if (typeUpper.includes("FLAT DECK") || typeUpper.includes("FLATDECK") || typeUpper.startsWith("FLAT") || typeUpper.startsWith("FD")) {
     return "FLAT DECK";
+  }
+  if (typeUpper.includes("WATER TRUCK") || typeUpper.includes("WATER") || typeUpper.startsWith("WT") || typeUpper.startsWith("WR")) {
+    return "WATER TRUCK";
   }
   if (typeUpper.includes("WHEEL LOADER") || typeUpper.includes("980 NG") || typeUpper.includes("CAT 980") || typeUpper.includes("980") || typeUpper.includes("WA 500") || typeUpper.includes("LOADER")) {
     return "WHEEL LOADER";
@@ -466,7 +523,7 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   if (typeUpper.includes("DUMP TRUCK") || typeUpper.includes("FM260") || typeUpper.includes("FM280") || typeUpper.includes("HD785")) {
     return "DUMP TRUCK";
   }
-  if (typeUpper.includes("FORKLIFT") || typeUpper.includes("FD150E") || (typeUpper.includes("KOMATSU") && (typeUpper.includes("FD150") || typeUpper.includes("FD 150")))) {
+  if (typeUpper.includes("FORKLIFT") || (typeUpper.startsWith("FL") && !typeUpper.startsWith("FLAT")) || (typeUpper.includes("KOMATSU") && (typeUpper.includes("FD150") || typeUpper.includes("FD 150")))) {
     return "FORKLIFT";
   }
   if (typeUpper.includes("EXCAVATOR") || typeUpper.includes("PC200") || typeUpper.includes("PC 210") || typeUpper.includes("320 GC") || typeUpper.includes("PC 495")) {
@@ -480,9 +537,6 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   }
   if (typeUpper.includes("FUEL TRUCK")) {
     return "FUEL TRUCK";
-  }
-  if (typeUpper.includes("WATER TRUCK") || typeUpper.includes("WATER")) {
-    return "WATER TRUCK";
   }
   if (typeUpper.includes("REACH STACKER") || typeUpper.includes("KONECRANE") || typeUpper.includes("45T")) {
     return "REACH STACKER";
@@ -530,10 +584,10 @@ export function deriveEquipmentType(idAlat?: string, typeAlat?: string): string 
   if (idStr.startsWith("DT23005") || idStr.startsWith("DT23006") || idStr.startsWith("DT23007") || idStr.startsWith("DT23008") || idStr.startsWith("DT23009") || idStr.startsWith("CT")) {
     return "HINO 500 (FM280JD)";
   }
-  if (idStr.startsWith("DT") || idStr.startsWith("FD")) {
+  if (idStr.startsWith("DT") || idStr.startsWith("FD") || idStr.startsWith("FLAT")) {
     return "HINO 500 (FM260JD)";
   }
-  if (idStr.startsWith("WL") || idStr.startsWith("WA")) {
+  if (idStr.startsWith("WL") || (idStr.startsWith("WA") && !idStr.startsWith("WAT"))) {
     return "CAT 980 NG";
   }
   if (idStr === "EX23203") {
@@ -554,16 +608,19 @@ export function deriveEquipmentType(idAlat?: string, typeAlat?: string): string 
   if (idStr.startsWith("RS") || idStr.startsWith("KC")) {
     return "KONECRANE 45T";
   }
-  if (idStr.startsWith("FL") || idStr.startsWith("FORKLIFT") || idStr.startsWith("FORK")) {
+  if ((idStr.startsWith("FL") && !idStr.startsWith("FLAT")) || idStr.startsWith("FORKLIFT") || idStr.startsWith("FORK")) {
     return "KOMATSU FD150E - 8";
   }
-  if (idStr.startsWith("FT") || idStr.startsWith("WT") || idStr.startsWith("WR")) {
-    return "DUTRO 136 HD";
+  if (idStr.startsWith("FT")) {
+    return rawType || "DUTRO 136 HD";
+  }
+  if (idStr.startsWith("WT") || idStr.startsWith("WR") || idStr.startsWith("WATER")) {
+    return rawType || "DUTRO 136 HD";
   }
   if (idStr.startsWith("GD") || idStr.startsWith("GRAD")) {
     return "KOMATSU GD 535";
   }
-  if (idStr.startsWith("WA") || idStr.startsWith("LOAD")) {
+  if (idStr.startsWith("LOAD") || (idStr.startsWith("WA") && !idStr.startsWith("WAT"))) {
     return "KOMATSU WA 500";
   }
   if (idStr.startsWith("GS") || idStr.includes("GENSET")) {
