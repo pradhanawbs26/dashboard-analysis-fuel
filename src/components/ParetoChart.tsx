@@ -9,9 +9,11 @@ interface ParetoChartProps {
   selectedType?: string; // backwards compatibility
   plans?: Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>;
   egyPlans?: EgyPlanMap;
+  onViewAnomalies?: () => void;
+  anomalyCount?: number;
 }
 
-export default function ParetoChart({ records, selectedEgy, selectedType = "SEMUA", plans = {}, egyPlans = {} }: ParetoChartProps) {
+export default function ParetoChart({ records, selectedEgy, selectedType = "SEMUA", plans = {}, egyPlans = {}, onViewAnomalies, anomalyCount }: ParetoChartProps) {
   const [hoveredUnit, setHoveredUnit] = useState<string | null>(null);
   const activeEgyFilter = selectedEgy || selectedType;
 
@@ -111,7 +113,7 @@ export default function ParetoChart({ records, selectedEgy, selectedType = "SEMU
           <div className="flex items-center gap-2">
             <BarChart2 className="w-5 h-5 text-slate-700" />
             <h3 className="text-lg font-bold text-slate-800">
-              Grafik Fuel Burn per Unit (Parameter Utama: Egy Alat)
+              Grafik Fue Burn Per Unit
             </h3>
           </div>
           <p className="text-xs text-slate-500 mt-1">
@@ -119,14 +121,27 @@ export default function ParetoChart({ records, selectedEgy, selectedType = "SEMU
           </p>
         </div>
 
-        <div className="flex items-center gap-4 text-xs bg-slate-100 py-1.5 px-3 rounded-lg border border-slate-200">
-          <div className="flex items-center gap-1.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-[#4682B4] block"></span>
-            <span className="text-slate-600 font-bold">Fuel Burn Normal (L/Jam)</span>
-          </div>
-          <div className="flex items-center gap-1.5 border-l border-slate-300 pl-2.5">
-            <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 block"></span>
-            <span className="text-slate-600 font-bold">Potensi Boros (Terboros)</span>
+        <div className="flex flex-wrap items-center gap-3">
+          {onViewAnomalies && (
+            <button
+              onClick={onViewAnomalies}
+              className="flex items-center gap-1.5 text-xs font-bold px-3 py-1.5 rounded-lg bg-amber-50 text-amber-800 hover:bg-amber-100 border border-amber-200 shadow-xs transition cursor-pointer"
+              title="Periksa baris anomali teknis yang disaring dari grafik"
+            >
+              <AlertTriangle className="w-3.5 h-3.5 text-amber-600" />
+              <span>Cek Anomali ({(anomalyCount !== undefined && anomalyCount !== null) ? anomalyCount : 0})</span>
+            </button>
+          )}
+
+          <div className="flex items-center gap-4 text-xs bg-slate-100 py-1.5 px-3 rounded-lg border border-slate-200">
+            <div className="flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-[#4682B4] block"></span>
+              <span className="text-slate-600 font-bold">Fuel Burn Normal (L/Jam)</span>
+            </div>
+            <div className="flex items-center gap-1.5 border-l border-slate-300 pl-2.5">
+              <span className="w-2.5 h-2.5 rounded-sm bg-rose-500 block"></span>
+              <span className="text-slate-600 font-bold">Potensi Boros (Terboros)</span>
+            </div>
           </div>
         </div>
       </div>

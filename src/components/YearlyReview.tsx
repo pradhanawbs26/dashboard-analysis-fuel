@@ -47,13 +47,16 @@ import {
   testConnection 
 } from "../lib/firebase";
 import { getSyncLocalData, saveLocalData, removeLocalData } from "../lib/storage";
-import { MonthlyReportData, EgyPlanMap } from "../types";
+import { MonthlyReportData, EgyPlanMap, FuelRecord } from "../types";
+import { processRecord, deriveEquipmentType } from "../data/sampleData";
 import { getStoredEgyPlans, saveStoredEgyPlans, subscribeToEgyPlans, DEFAULT_EGY_PLANS } from "../lib/egyPlanService";
 
 interface YearlyReviewProps {
   onBackToDashboard?: () => void;
   egyPlans?: EgyPlanMap;
   onOpenPlanManager?: () => void;
+  onSyncRecords?: (newRecords: FuelRecord[]) => void;
+  onSelectMonthForDashboard?: (monthName: string) => void;
 }
 
 // Hardcoded standard plans for equipment types matching the July Benchmark (Jenis Egy)
@@ -215,7 +218,13 @@ const SAMPLE_YEARLY_DATA = [
   { bulan: "Juni", typeAlat: "GENSET", totalVolume: 2510, totalHours: 100, recordCount: 15 }
 ];
 
-export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans, onOpenPlanManager }: YearlyReviewProps) {
+export default function YearlyReview({ 
+  onBackToDashboard, 
+  egyPlans: propEgyPlans, 
+  onOpenPlanManager,
+  onSyncRecords,
+  onSelectMonthForDashboard
+}: YearlyReviewProps) {
   // Local fallback / synced egyPlans
   const [internalEgyPlans, setInternalEgyPlans] = useState<EgyPlanMap>(() => getStoredEgyPlans());
   const [isInternalPlanModalOpen, setIsInternalPlanModalOpen] = useState(false);
@@ -905,6 +914,7 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
         // Track how many sheets were parsed successfully
         let sheetsCountParsed = 0;
         const allUnitAggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
+        const parsedRawFuelRecords: FuelRecord[] = [];
 
         // Find sheet "Issued" specifically if present
         const issuedSheetName = workbook.SheetNames.find(
@@ -950,6 +960,10 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
             hmSebelum: isJuneOrLater ? 11 : 10,                         // Column L (index 11) or Column K (index 10)
             hmSaatIni: isJuneOrLater ? 12 : 11,                         // Column M (index 12) or Column L (index 11)
             volumeFuel: isJuneOrLater ? 14 : 13,                        // Column O (index 14) or Column N (index 13)
+            operator: isJuneOrLater ? 18 : 17,                          // Column S or R
+            fuelman: isJuneOrLater ? 21 : 20,                           // Column V or U
+            shift: isJuneOrLater ? 22 : 21,                             // Column W or V
+            jam: isJuneOrLater ? 23 : 22                                // Column X or W
           };
 
           let detectedHeaderRowIdx = -1;
@@ -1159,8 +1173,9 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
 
               // Attempt to scrape month from date cell
               let rowMonthName = selectedMonthForUpload || monthIdentifier;
+              let normalizedYmd = "";
               if (!selectedMonthForUpload && colMap.tanggal !== -1 && row[colMap.tanggal]) {
-                const normalizedYmd = normalizeDateToYMD(row[colMap.tanggal]);
+                normalizedYmd = normalizeDateToYMD(row[colMap.tanggal]);
                 if (normalizedYmd) {
                   const parts = normalizedYmd.split("-");
                   if (parts.length === 3) {
@@ -1171,6 +1186,37 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
                   }
                 }
               }
+
+              // Synthesize full transaction record for raw log preservation
+              const fallbackTanggal = normalizedYmd || (rowMonthName ? (() => {
+                const mIdx = getMonthFromText(rowMonthName);
+                const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "01";
+                return `2026-${mPad}-15`;
+              })() : "2026-01-01");
+
+              const rowStorage = colMap.storage !== -1 && colMap.storage < row.length && row[colMap.storage] ? String(row[colMap.storage]).trim() : "Storage Utama Central";
+              const rowOperator = colMap.operator !== -1 && colMap.operator < row.length && row[colMap.operator] ? String(row[colMap.operator]).trim() : "Operator Lapangan";
+              const rowFuelman = colMap.fuelman !== -1 && colMap.fuelman < row.length && row[colMap.fuelman] ? String(row[colMap.fuelman]).trim() : "Fuelman Onsite";
+              const rowShift = colMap.shift !== -1 && colMap.shift < row.length && row[colMap.shift] ? String(row[colMap.shift]).trim() : "Shift 1 - Siang";
+              const rowJam = colMap.jam !== -1 && colMap.jam < row.length && row[colMap.jam] ? String(row[colMap.jam]).trim() : "12:00";
+
+              const processedLogItem = processRecord({
+                id: `yr-rec-${sheetName}-${r}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
+                tanggal: fallbackTanggal,
+                storage: rowStorage,
+                idAlat: cleanIdUpper,
+                typeAlat: typeAlat || deriveEquipmentType(cleanIdUpper),
+                egy: egyAlat,
+                hmSebelum: isNaN(prevHmVal) ? 0 : prevHmVal,
+                hmSaatIni: isNaN(currHmVal) ? 0 : currHmVal,
+                volumeFuel: validVol,
+                operator: rowOperator,
+                fuelman: rowFuelman,
+                shift: rowShift,
+                jam: rowJam
+              });
+
+              parsedRawFuelRecords.push(processedLogItem);
 
               const groupKey = egyAlat;
               if (!sheetAggregates[groupKey]) {
@@ -1341,7 +1387,8 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
           unitDetails,
           rawPayload: {
             parsedEntries,
-            unitAggregates: Object.values(allUnitAggregates)
+            unitAggregates: Object.values(allUnitAggregates),
+            rawFuelRecords: parsedRawFuelRecords
           }
         };
 
@@ -1458,6 +1505,35 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
       setUploadedMonths(nextMonths);
       saveLocalData("yearly_data_points", nextPts);
       saveLocalData("yearly_uploaded_months", nextMonths);
+
+      // Merge raw transaction logs into global fuel_records so Monthly Review can analyze any month
+      if (rawPayload.rawFuelRecords && Array.isArray(rawPayload.rawFuelRecords) && rawPayload.rawFuelRecords.length > 0) {
+        const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
+        const targetMonthIndex = getMonthFromText(confirmedMonth);
+        const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "";
+
+        // Align raw records dates with confirmed month if needed
+        const alignedLogs = (rawPayload.rawFuelRecords as FuelRecord[]).map(r => {
+          if (targetMonthPad && !r.tanggal.includes(`-${targetMonthPad}-`)) {
+            const parts = r.tanggal.split("-");
+            const dayPart = parts.length === 3 ? parts[2] : "15";
+            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
+          }
+          return r;
+        });
+
+        // Filter out existing logs of this month to prevent duplicate stacking
+        const existingFiltered = currentSavedRecords.filter(r => {
+          if (!targetMonthPad) return true;
+          return !r.tanggal.startsWith(`2026-${targetMonthPad}`);
+        });
+
+        const mergedRecords = [...existingFiltered, ...alignedLogs];
+        saveLocalData("fuel_records", mergedRecords);
+        if (onSyncRecords) {
+          onSyncRecords(mergedRecords);
+        }
+      }
 
       setIsAnalysisModalOpen(false);
       setAnalysisStagingData(null);
@@ -2193,29 +2269,42 @@ export default function YearlyReview({ onBackToDashboard, egyPlans: propEgyPlans
                   )}
                 </div>
 
-                <div className="flex items-center gap-1.5 mt-2">
-                  <button
-                    onClick={() => triggerUploadForMonth(monthName)}
-                    className={`text-[9px] font-black py-1.5 px-2 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 flex-1 ${
-                      isUploaded
-                        ? "bg-emerald-600 hover:bg-emerald-700 text-white"
-                        : hasData
-                        ? "bg-slate-800 hover:bg-slate-700 text-white"
-                        : "bg-white border border-slate-250 hover:bg-slate-100 text-slate-600 shadow-sm"
-                    }`}
-                  >
-                    <Upload className="w-2.5 h-2.5" />
-                    <span>{hasData ? "Ganti File" : "Upload"}</span>
-                  </button>
-
-                  {hasData && (
+                <div className="flex flex-col gap-1.5 mt-2">
+                  <div className="flex items-center gap-1.5">
                     <button
-                      onClick={() => handleClearMonthData(monthName)}
-                      className="p-1 px-2 rounded-lg border border-rose-100 bg-white hover:bg-rose-55 hover:border-rose-200 text-rose-500 hover:text-rose-700 transition cursor-pointer active:scale-95 flex items-center gap-1"
-                      title={`Hapus data log pengisian untuk bulan ${monthName}`}
+                      onClick={() => triggerUploadForMonth(monthName)}
+                      className={`text-[9px] font-black py-1.5 px-2 rounded-lg flex items-center justify-center gap-1 cursor-pointer transition active:scale-95 flex-1 ${
+                        isUploaded
+                          ? "bg-emerald-600 hover:bg-emerald-700 text-white"
+                          : hasData
+                          ? "bg-slate-800 hover:bg-slate-700 text-white"
+                          : "bg-white border border-slate-250 hover:bg-slate-100 text-slate-600 shadow-sm"
+                      }`}
                     >
-                      <Trash2 className="w-3 h-3" />
-                      <span className="text-[10px] font-bold">Hapus</span>
+                      <Upload className="w-2.5 h-2.5" />
+                      <span>{hasData ? "Ganti File" : "Upload"}</span>
+                    </button>
+
+                    {hasData && (
+                      <button
+                        onClick={() => handleClearMonthData(monthName)}
+                        className="p-1 px-2 rounded-lg border border-rose-100 bg-white hover:bg-rose-55 hover:border-rose-200 text-rose-500 hover:text-rose-700 transition cursor-pointer active:scale-95 flex items-center gap-1"
+                        title={`Hapus data log pengisian untuk bulan ${monthName}`}
+                      >
+                        <Trash2 className="w-3 h-3" />
+                        <span className="text-[10px] font-bold">Hapus</span>
+                      </button>
+                    )}
+                  </div>
+
+                  {hasData && onSelectMonthForDashboard && (
+                    <button
+                      onClick={() => onSelectMonthForDashboard(monthName)}
+                      className="text-[9px] font-extrabold py-1 px-2 rounded-md bg-[#4682B4]/10 hover:bg-[#4682B4]/20 text-[#2F4F4F] border border-[#4682B4]/30 transition cursor-pointer flex items-center justify-center gap-1"
+                      title={`Buka & analisa rincian transaksi bulan ${monthName} di Monthly Review`}
+                    >
+                      <BarChart2 className="w-2.5 h-2.5 text-[#4682B4]" />
+                      <span>Buka Monthly Review</span>
                     </button>
                   )}
                 </div>

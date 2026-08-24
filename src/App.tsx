@@ -233,7 +233,7 @@ export default function App() {
   useEffect(() => {
     // Dynamic browser tab favicon & title ensure
     document.title = "DASHBOARD FUEL ANALYSIS PT. WBS";
-    const faviconUrl = "https://res.cloudinary.com/dgjnlxf69/image/upload/v1787452149/Logo_Fuel_Monitor_uipgcq.png";
+    const faviconUrl = "https://res.cloudinary.com/dgjnlxf69/image/upload/v1787534678/Logo_Fuel_Monitor_air6wr.png";
     let iconLink = document.querySelector<HTMLLinkElement>("link[rel~='icon']");
     if (!iconLink) {
       iconLink = document.createElement("link");
@@ -241,6 +241,10 @@ export default function App() {
       document.head.appendChild(iconLink);
     }
     iconLink.href = faviconUrl;
+    let appleIconLink = document.querySelector<HTMLLinkElement>("link[rel='apple-touch-icon']");
+    if (appleIconLink) {
+      appleIconLink.href = faviconUrl;
+    }
   }, []);
 
   useEffect(() => {
@@ -1769,7 +1773,7 @@ export default function App() {
           <div className="flex items-center gap-3">
             <div className="w-10 h-10 bg-white rounded-lg flex items-center justify-center shadow-inner overflow-hidden border border-[#334155] p-1 shrink-0">
               <img 
-                src="https://res.cloudinary.com/dgjnlxf69/image/upload/v1787452149/Logo_Fuel_Monitor_uipgcq.png" 
+                src="https://res.cloudinary.com/dgjnlxf69/image/upload/v1787534678/Logo_Fuel_Monitor_air6wr.png" 
                 alt="Logo Fuel Monitor PT. WBS" 
                 className="w-8 h-8 object-contain" 
                 referrerPolicy="no-referrer"
