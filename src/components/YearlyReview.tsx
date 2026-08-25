@@ -611,21 +611,19 @@ export default function YearlyReview({
   // Trigger file upload for a specific month
   const triggerUploadForMonth = (monthName: string) => {
     setSelectedMonthForUpload(monthName);
-    setTimeout(() => {
-      if (fileInputRef.current) {
-        fileInputRef.current.click();
-      }
-    }, 50);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
   };
 
   // Trigger file upload for multi-month master file
   const triggerGlobalUpload = () => {
     setSelectedMonthForUpload(null);
-    setTimeout(() => {
-      if (fileInputRef.current) {
-        fileInputRef.current.click();
-      }
-    }, 50);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+      fileInputRef.current.click();
+    }
   };
 
   // Export Entire Yearly Review Module to PDF via html2canvas-pro & jsPDF
@@ -2168,18 +2166,52 @@ export default function YearlyReview({
         </div>
       </div>
 
+      {/* Feedback Toast Notification Banner */}
+      {feedback.message && (
+        <div className={`p-4 rounded-xl text-xs flex items-center justify-between gap-3 border shadow-sm ${
+          feedback.type === "success" 
+            ? "bg-emerald-50 border-emerald-200 text-emerald-800"
+            : "bg-rose-50 border-rose-200 text-rose-800"
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {feedback.type === "success" ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-4 h-4 text-rose-600 shrink-0" />
+            )}
+            <p className="font-semibold text-xs leading-normal">{feedback.message}</p>
+          </div>
+          <button 
+            onClick={() => setFeedback({ type: null, message: "" })} 
+            className="text-xs font-bold text-slate-400 hover:text-slate-600 cursor-pointer"
+          >
+            ✕
+          </button>
+        </div>
+      )}
+
       {/* 12 MONTHLY UPLOAD DECK */}
       <div className="bg-white rounded-xl border border-slate-200/80 shadow-sm p-5 space-y-5">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-4">
           <div className="flex items-center gap-2">
-            <Upload className="w-5 h-5 text-[#4682B4] animate-pulse" />
+            <Upload className="w-5 h-5 text-[#4682B4]" />
             <div>
               <h3 className="text-sm font-extrabold text-slate-800">Detail Report Fuel Monthly</h3>
-              <p className="text-[10px] text-slate-400 font-bold">Upload file log pengisian BBM terpisah untuk tiap-tiap bulan.</p>
+              <p className="text-[10px] text-slate-400 font-bold">Upload file log pengisian BBM terpisah untuk tiap-tiap bulan atau unggah file rekapan komprehensif.</p>
             </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
+            <button
+              onClick={triggerGlobalUpload}
+              disabled={isProcessing}
+              className="text-[10px] font-extrabold bg-[#4682B4] hover:bg-[#36648B] text-white px-3.5 py-2 rounded-lg shadow-sm transition active:scale-95 cursor-pointer flex items-center gap-1.5"
+              title="Unggah file Excel rekapan / multi-bulan"
+            >
+              <Upload className="w-3.5 h-3.5 text-blue-100" />
+              <span>{isProcessing ? "Menganalisa..." : "Upload File Excel"}</span>
+            </button>
+
             <button
               onClick={handleClearAllData}
               className="text-[10px] font-extrabold bg-rose-50 hover:bg-rose-100 text-rose-600 px-3.5 py-2 rounded-lg border border-rose-250 transition active:scale-95 cursor-pointer flex items-center gap-1.5"
@@ -2393,6 +2425,16 @@ export default function YearlyReview({
           });
         }}
         availableEgysInDataset={uniqueEquipmentTypes}
+      />
+
+      {/* Hidden File Input for Monthly Uploads & Re-uploads */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".xlsx,.xls"
+        multiple={false}
+        onChange={handleFileChange}
+        className="hidden"
       />
 
     </div>

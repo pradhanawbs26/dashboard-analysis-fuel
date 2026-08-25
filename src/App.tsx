@@ -1836,6 +1836,7 @@ export default function App() {
 
   const triggerFileDialog = () => {
     if (fileInputRef.current) {
+      fileInputRef.current.value = "";
       fileInputRef.current.click();
     }
   };
