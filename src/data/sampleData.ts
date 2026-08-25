@@ -112,6 +112,25 @@ export const MASTER_JULY_BENCHMARKS: Record<string, number> = {
   "CATERPILAR CS 11 GC": 8.0,
 };
 
+export const KNOWN_CANONICAL_EGY = [
+  "DUMP TRUCK",
+  "EXCAVATOR",
+  "BULLDOZER",
+  "FLAT DECK",
+  "CRANE TRUCK",
+  "FUEL TRUCK",
+  "FORKLIFT",
+  "WATER TRUCK",
+  "REACH STACKER",
+  "TOWER LAMP",
+  "LIGHT VEHICLE",
+  "MOTOR GRADER",
+  "WHEEL LOADER",
+  "COMPACTOR",
+  "GENSET",
+  "SUPPORT"
+];
+
 // Helper to clean and normalize Egy names (remove any legacy redundant 'EGY ' prefix and map fleet model names to canonical Egy)
 export function cleanEgyName(name: string): string {
   if (!name) return "";
@@ -120,6 +139,20 @@ export function cleanEgyName(name: string): string {
     clean = clean.substring(4).trim();
   }
   const upper = clean.toUpperCase();
+
+  // If the string is actually a Storage / Fuel Station name (e.g. FS15002, FT-01, Storage Central, etc.), reject as Egy
+  if (
+    upper.startsWith("FS") ||
+    upper.includes("FS15") ||
+    upper.includes("STORAGE") ||
+    upper.includes("TANGKI") ||
+    upper.includes("TEMPAT") ||
+    upper.includes("PENGISIAN") ||
+    upper.includes("DISPENSER") ||
+    upper.includes("FLOWMETER")
+  ) {
+    return "";
+  }
 
   // 1. Flat Deck (FD prefixes or FLAT DECK / FLAT name) - MUST BE CHECKED BEFORE FORKLIFT!
   if (upper.includes("FLAT DECK") || upper.includes("FLATDECK") || upper.startsWith("FLAT") || upper.startsWith("FD")) {
@@ -196,6 +229,10 @@ export function cleanEgyName(name: string): string {
     return "FUEL TRUCK";
   }
 
+  if (KNOWN_CANONICAL_EGY.includes(upper)) {
+    return upper;
+  }
+
   return clean;
 }
 
@@ -206,121 +243,25 @@ export interface JulyEquipmentMaster {
 
 // Canonical July Benchmark Master Map (Kolom C: Equipment, Kolom D: Egy, Kolom E: Type)
 export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
-  // Dump Trucks
-  "DT23001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT23002": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT23003": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT23004": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT23005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT23006": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT23007": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT23008": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT23009": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT-01": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT-02": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT-HD785-05": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT-HD785-06": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT-HD785-07": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "HN-260-01": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "HN-260-02": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "HN-280-01": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "HN-280-02": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-
   // Bulldozers
   "DZ23001": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
   "DZ-01": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
-  "BULL-D85-01": { egy: "BULLDOZER", type: "KOMATSU D85SS" },
-  "BULL-D85-02": { egy: "BULLDOZER", type: "KOMATSU D85SS" },
-  "BD-01": { egy: "BULLDOZER", type: "KOMATSU D85SS" },
 
-  // Tower Lamp
-  "TL23002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
-  "TL-01": { egy: "TOWER LAMP", type: "TOWER LAMP" },
-  "TL-02": { egy: "TOWER LAMP", type: "TOWER LAMP" },
+  // Wheel Loaders
+  "WL23001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
+  "WL23002": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
+  "WL23003": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
+  "WL23004": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
+  "WA-500-01": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
 
-  // Light Vehicles
-  "LV23207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
-  "LV-01": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
-  "LV-02": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
-  "LV-HILUX-01": { egy: "LIGHT VEHICLE", type: "LIGHT VEHICLE" },
-  "LIGHT VEHICLE": { egy: "LIGHT VEHICLE", type: "LIGHT VEHICLE" },
-
-  // Excavators
-  "EX23001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EX23203": { egy: "EXCAVATOR", type: "CAT 320 GC" },
-  "EX-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EX-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EXC-PC200-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EXC-PC200-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EXC-PC200-03": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "PC-210-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "PC-210-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "HY-495-01": { egy: "EXCAVATOR", type: "HYUNDAI PC 495" },
-  "HYUNDAI-495": { egy: "EXCAVATOR", type: "HYUNDAI PC 495" },
-  "PC-495-01": { egy: "EXCAVATOR", type: "HYUNDAI PC 495" },
-
-  // Crane Truck
-  "CT23001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
-  "CT-01": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
-
-  // Fuel Truck
-  "FT23001": { egy: "FUEL TRUCK", type: "DUTRO 136 HD" },
-  "FT-01": { egy: "FUEL TRUCK", type: "DUTRO 136 HD" },
-
-  // Forklift & Heavy Lifting (FL... is strictly FORKLIFT)
-  "FL23001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL23002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL15001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL15002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL-150-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL-150-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FORKLIFT-15T": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FORKLIFT": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "KOMATSU FD150E - 8": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-
-  // Water Truck (WT, WR, WATER)
-  "WT23001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23002": { egy: "WATER TRUCK", type: "HINO 500 (FM280JD)" },
-  "WT23003": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23004": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23005": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23006": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23007": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23008": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23009": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT23102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WT-01": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WT-02": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WR23002": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WATER TRUCK": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-
-  // Reach Stacker
+  // Reach Stackers
+  "RS23001": { egy: "REACH STACKER", type: "KONECRANE 45T" },
+  "RS23002": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS23003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "KC-45T-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
-  "KC-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
-  "KONECRANE-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
 
-  // Wheel Loaders & Compactors
-  "WL23001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
-  "WL23002": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
-  "CAT 980 NG": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
-  "CAT 980": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
-  "WA-500-01": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
-  "LOAD-WA500-01": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
-  "LOAD-WA500-02": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
-  "CATERPILAR CS 11 GC": { egy: "COMPACTOR", type: "CATERPILAR CS 11 GC" },
-  "CS 11 GC": { egy: "COMPACTOR", type: "CATERPILAR CS 11 GC" },
-  "COMPACTOR": { egy: "COMPACTOR", type: "CATERPILAR CS 11 GC" },
-
-  // Flat Deck
-  "FD23209": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD23213": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD23214": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD23215": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  // Flat Decks
   "FD23001": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23002": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23003": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
@@ -344,6 +285,10 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "FD23021": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23022": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23023": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23209": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23213": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23214": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23215": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD15001": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD15002": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD15003": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
@@ -354,19 +299,79 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "FD15032": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD15035": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD-01": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FLAT DECK": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
 
-  // Motor Graders
-  "GRAD-GD511-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
+  // Dump Trucks
+  "DT23001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT23002": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT23003": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT23004": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT23005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT23006": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT23007": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT23008": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT23009": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT-01": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT-02": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+
+  // Excavators
+  "EX23001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
+  "EX23203": { egy: "EXCAVATOR", type: "CAT 320 GC" },
+  "EX-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
+  "EX-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
+
+  // Fuel Truck
+  "FT23001": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
+  "FT-01": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
+
+  // Water Trucks
+  "WT23001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23002": { egy: "WATER TRUCK", type: "HINO 500 (FM280JD)" },
+  "WT23003": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23004": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23005": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23006": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23007": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23008": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23009": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT23102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WT-01": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WT-02": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WR23002": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+
+  // Forklifts
+  "FL23001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL23002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL15001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL15002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+  "FL-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
+
+  // Motor Grader
+  "GD23001": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-02": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
 
+  // Crane Truck
+  "CT23001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
+  "CT-01": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
+
+  // Tower Lamp
+  "TL23002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
+  "TL-01": { egy: "TOWER LAMP", type: "TOWER LAMP" },
+
+  // Light Vehicles
+  "LV23207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
+  "LV-01": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
+
+  // Compactor
+  "CP23001": { egy: "COMPACTOR", type: "BOMAG BW211 / CATERPILAR CS 11 GC" },
+
   // Gensets
+  "GS23001": { egy: "GENSET", type: "GENSET CUMMINS 250KVA" },
   "GS-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
   "GENSET-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
-  "GENSET-02": { egy: "GENSET", type: "GENSET EX PT MAS" },
-  "GENSET EX PT MAS": { egy: "GENSET", type: "GENSET EX PT MAS" },
 };
 
 // Legacy compatibility object
@@ -391,10 +396,13 @@ export function getJulyBenchmarkRegistry(): Record<string, { egy: string; type?:
         const cleaned: Record<string, { egy: string; type?: string }> = {};
         Object.entries(parsed).forEach(([k, v]: [string, any]) => {
           if (!k || k.length < 2 || !isNaN(Number(k)) || k.includes(".") || k === "C" || k === "TOTAL") return;
-          const egy = typeof v === "string" ? v : v?.egy;
+          const rawEgy = typeof v === "string" ? v : v?.egy;
           const type = typeof v === "object" ? v?.type : "";
-          if (egy && egy !== "C" && egy.length > 1) {
-            cleaned[k] = { egy, type };
+          if (rawEgy && rawEgy !== "C" && rawEgy.length > 1) {
+            const canonicalEgy = cleanEgyName(rawEgy);
+            if (canonicalEgy && KNOWN_CANONICAL_EGY.includes(canonicalEgy)) {
+              cleaned[k.toUpperCase()] = { egy: canonicalEgy, type };
+            }
           }
         });
         return { ...JULY_BENCHMARK_MASTER, ...cleaned };
@@ -414,12 +422,17 @@ export function saveJulyBenchmarkRegistry(newMap: Record<string, string | { egy:
     const normalizedNew: Record<string, { egy: string; type?: string }> = {};
     Object.entries(newMap).forEach(([k, v]) => {
       if (!k || k.length < 2 || !isNaN(Number(k)) || k.includes(".") || k === "C" || k === "TOTAL") return;
-      const egyVal = typeof v === "string" ? v : v?.egy;
-      if (!egyVal || egyVal === "C" || egyVal.length < 2) return;
+      const cleanKey = k.toUpperCase().trim();
+      const rawEgy = typeof v === "string" ? v : v?.egy;
+      if (!rawEgy || rawEgy === "C" || rawEgy.length < 2) return;
+      const canonicalEgy = cleanEgyName(rawEgy);
+      // Strictly prevent non-canonical names (such as storage / fuel station names) from entering registry
+      if (!canonicalEgy || !KNOWN_CANONICAL_EGY.includes(canonicalEgy)) return;
+
       if (typeof v === "string") {
-        normalizedNew[k] = { egy: v, type: current[k]?.type || deriveEquipmentType(k, "") };
+        normalizedNew[cleanKey] = { egy: canonicalEgy, type: current[cleanKey]?.type || deriveEquipmentType(cleanKey, "") };
       } else if (v && typeof v === "object") {
-        normalizedNew[k] = { egy: v.egy, type: v.type || deriveEquipmentType(k, "") };
+        normalizedNew[cleanKey] = { egy: canonicalEgy, type: v.type || deriveEquipmentType(cleanKey, "") };
       }
     });
     const merged = { ...current, ...normalizedNew };
@@ -435,8 +448,21 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   const rawType = (typeAlat || "").trim();
   const typeUpper = rawType.toUpperCase();
 
-  // 1. PRIMARY ASSESSMENT: Match Equipment ID patterns (Nomor Equipment)
+  // 1. PRIMARY ASSESSMENT: Match Equipment ID standard Prefix (Nomor Equipment Prefix)
+  // Deterministic and immune to misaligned columns or corrupted spreadsheets
   if (idStr) {
+    // Dump Truck: e.g. DT23001, DT23005, DT-HD785, HN-260, HN-280, DT-01
+    if (idStr.startsWith("DT") || idStr.startsWith("HN-260") || idStr.startsWith("HN-280") || idStr.startsWith("HD")) {
+      return "DUMP TRUCK";
+    }
+    // Excavator: e.g. EX23001, EX23203, PC-210, HY-495, EXC-PC200
+    if (idStr.startsWith("EX") || idStr.startsWith("PC") || idStr.startsWith("HY") || idStr.startsWith("EXC")) {
+      return "EXCAVATOR";
+    }
+    // Bulldozer: e.g. DZ23001, BD-01, BULL-D85, DOZER
+    if (idStr.startsWith("DZ") || idStr.startsWith("BD") || idStr.startsWith("BULL") || idStr.startsWith("DOZER")) {
+      return "BULLDOZER";
+    }
     // Flat Deck: e.g. FD23001, FD23002, FD23209, FD-01, FD15035, FD15004, FD15008, FD15014, FD15032, FD15024, FD15003, FD...
     if (idStr.startsWith("FD") || idStr.startsWith("FLAT") || idStr.includes("FLAT DECK") || idStr.includes("FLATDECK")) {
       return "FLAT DECK";
@@ -452,18 +478,6 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
     // Wheel Loader: e.g. WL23001, WL23002, WA-500, LOAD-WA500 (strictly excluding WATER)
     if (idStr.startsWith("WL") || (idStr.startsWith("WA") && !idStr.startsWith("WAT")) || idStr.startsWith("LOAD")) {
       return "WHEEL LOADER";
-    }
-    // Dump Truck: e.g. DT23001, DT-HD785, HN-260, HN-280, DT-01
-    if (idStr.startsWith("DT") || idStr.startsWith("HN-260") || idStr.startsWith("HN-280") || idStr.startsWith("HD")) {
-      return "DUMP TRUCK";
-    }
-    // Excavator: e.g. EX23001, EX23203, PC-210, HY-495, EXC-PC200
-    if (idStr.startsWith("EX") || idStr.startsWith("PC") || idStr.startsWith("HY") || idStr.startsWith("EXC")) {
-      return "EXCAVATOR";
-    }
-    // Bulldozer: e.g. DZ23001, BD-01, BULL-D85, DOZER
-    if (idStr.startsWith("DZ") || idStr.startsWith("BD") || idStr.startsWith("BULL") || idStr.startsWith("DOZER")) {
-      return "BULLDOZER";
     }
     // Crane Truck: e.g. CT23001, CT-01, CRANE
     if (idStr.startsWith("CT") || idStr.startsWith("CRANE")) {
@@ -499,15 +513,21 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
     }
   }
 
-  // 2. Check dynamic July benchmark registry (from uploaded List & FC or July files)
+  // 2. Check dynamic benchmark registry (from uploaded List & FC, Plan Fuel Burn, or August files)
   const registry = getJulyBenchmarkRegistry();
   if (idStr && registry[idStr] && registry[idStr].egy) {
-    return cleanEgyName(registry[idStr].egy);
+    const regEgy = cleanEgyName(registry[idStr].egy);
+    if (regEgy && KNOWN_CANONICAL_EGY.includes(regEgy)) {
+      return regEgy;
+    }
   }
 
-  // 3. Check static July benchmark map
+  // 3. Check static benchmark master (from August / List & FC master reference)
   if (idStr && JULY_BENCHMARK_MASTER[idStr]) {
-    return cleanEgyName(JULY_BENCHMARK_MASTER[idStr].egy);
+    const masterEgy = cleanEgyName(JULY_BENCHMARK_MASTER[idStr].egy);
+    if (masterEgy && KNOWN_CANONICAL_EGY.includes(masterEgy)) {
+      return masterEgy;
+    }
   }
 
   // 4. Match type descriptions if ID didn't match
@@ -526,42 +546,45 @@ export function deriveEgy(idAlat?: string, typeAlat?: string): string {
   if (typeUpper.includes("FORKLIFT") || (typeUpper.startsWith("FL") && !typeUpper.startsWith("FLAT")) || (typeUpper.includes("KOMATSU") && (typeUpper.includes("FD150") || typeUpper.includes("FD 150")))) {
     return "FORKLIFT";
   }
-  if (typeUpper.includes("EXCAVATOR") || typeUpper.includes("PC200") || typeUpper.includes("PC 210") || typeUpper.includes("320 GC") || typeUpper.includes("PC 495")) {
-    return "EXCAVATOR";
-  }
-  if (typeUpper.includes("BULLDOZER") || typeUpper.includes("DOZER") || typeUpper.includes("D8T") || typeUpper.includes("D85")) {
-    return "BULLDOZER";
-  }
   if (typeUpper.includes("CRANE TRUCK") || (typeUpper.includes("CRANE") && !typeUpper.includes("KONECRANE"))) {
     return "CRANE TRUCK";
-  }
-  if (typeUpper.includes("FUEL TRUCK")) {
-    return "FUEL TRUCK";
   }
   if (typeUpper.includes("REACH STACKER") || typeUpper.includes("KONECRANE") || typeUpper.includes("45T")) {
     return "REACH STACKER";
   }
-  if (typeUpper.includes("TOWER LAMP")) {
+  if (typeUpper.includes("COMPACTOR") || typeUpper.includes("CS 11") || typeUpper.includes("CS11") || typeUpper.includes("VIBRO") || typeUpper.includes("BOMAG") || typeUpper.includes("CATERPILAR CS")) {
+    return "COMPACTOR";
+  }
+  if (typeUpper.includes("BULLDOZER") || typeUpper.includes("D8T") || typeUpper.includes("D85") || typeUpper.includes("DOZER")) {
+    return "BULLDOZER";
+  }
+  if (typeUpper.includes("MOTOR GRADER") || typeUpper.includes("GD 535") || typeUpper.includes("GD535") || typeUpper.includes("GD 511") || typeUpper.includes("GRADER")) {
+    return "MOTOR GRADER";
+  }
+  if (typeUpper.includes("EXCAVATOR") || typeUpper.includes("PC 210") || typeUpper.includes("PC210") || typeUpper.includes("320 GC") || typeUpper.includes("320GC") || typeUpper.includes("PC 495") || typeUpper.includes("EXCA")) {
+    return "EXCAVATOR";
+  }
+  if (typeUpper.includes("TOWER LAMP") || typeUpper.includes("TOWERLAMP")) {
     return "TOWER LAMP";
   }
   if (typeUpper.includes("LIGHT VEHICLE") || typeUpper.includes("INNOVA") || typeUpper.includes("HILUX") || typeUpper.includes("TRITON")) {
     return "LIGHT VEHICLE";
   }
-  if (typeUpper.includes("MOTOR GRADER") || typeUpper.includes("GD 535") || typeUpper.includes("GD 511") || typeUpper.includes("GRADER")) {
-    return "MOTOR GRADER";
-  }
-  if (typeUpper.includes("COMPACTOR") || typeUpper.includes("CS 11") || typeUpper.includes("CS11") || typeUpper.includes("VIBRO") || typeUpper.includes("BOMAG")) {
-    return "COMPACTOR";
-  }
-  if (typeUpper.includes("GENSET") || typeUpper.includes("GENSET EX PT MAS")) {
+  if (typeUpper.includes("GENSET") || typeUpper.includes("GENERATOR")) {
     return "GENSET";
   }
-  if (typeUpper.includes("DUTRO")) {
+  if (typeUpper.includes("FUEL TRUCK") || typeUpper.includes("DUTRO")) {
     return "FUEL TRUCK";
   }
 
-  // 5. Fallback
-  return rawType ? cleanEgyName(rawType) : "DUMP TRUCK";
+  // 5. Check if raw type can be cleaned into a known Egy
+  const cleanedType = cleanEgyName(rawType);
+  if (cleanedType && KNOWN_CANONICAL_EGY.includes(cleanedType)) {
+    return cleanedType;
+  }
+
+  // 6. Safe fallbacks based on prefix or default to DUMP TRUCK
+  return "DUMP TRUCK";
 }
 
 // Master Helper: Strictly derive the canonical July Type for ANY equipment number & type from Jan-Jun onwards
@@ -632,7 +655,9 @@ export function deriveEquipmentType(idAlat?: string, typeAlat?: string): string 
 
 // Dynamic helper to compute values for a raw row
 export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnomaly' | 'anomalyMessage' | 'egy'> & { egy?: string }): FuelRecord {
-  const egy = raw.egy && raw.egy.trim() ? cleanEgyName(raw.egy) : deriveEgy(raw.idAlat, raw.typeAlat);
+  // Always prioritize canonical Egy derived from Equipment ID (Kolom Nomor Unit) & Plan Fuel Burn / August Benchmark
+  const resolvedEgy = deriveEgy(raw.idAlat, raw.egy || raw.typeAlat);
+  const egy = resolvedEgy || (raw.egy && raw.egy.trim() ? cleanEgyName(raw.egy) : "LAINNYA");
   const selisihHm = Number((raw.hmSaatIni - raw.hmSebelum).toFixed(2));
   let fuelBurnRate = 0;
   let isAnomaly = false;
@@ -652,10 +677,7 @@ export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate'
     fuelBurnRate = Number((raw.volumeFuel / selisihHm).toFixed(2));
     
     // Additional logic warning: typical heavy machinery burn rates
-    // Excavator PC200 typically burns 15 - 28 L/h
-    // Dump Truck HD785 typically burns 55 - 90 L/h
-    // Bulldozer D85SS typically burns 20 - 35 L/h
-    // Standard flagging if fuel burn rate exceeds realistic thresholds for safety audit
+    // Flagging if fuel burn rate exceeds realistic thresholds for safety audit
     if (fuelBurnRate > 120) {
       isAnomaly = true;
       anomalyMessage = `Fuel Burn Sangat Tinggi (${fuelBurnRate} L/Jam - Indikasi Kebocoran/Salah input)`;
@@ -679,13 +701,13 @@ export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate'
 const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnomaly' | 'anomalyMessage' | 'egy'> & { egy?: string })[] = [
   {
     id: "rec-001",
-    tanggal: "2026-05-27",
+    tanggal: "2026-08-27",
     storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-01",
-    typeAlat: "Excavator PC200",
+    idAlat: "EX23001",
+    typeAlat: "KOMATSU PC 210",
     hmSebelum: 4210.5,
     hmSaatIni: 4220.5, // 10 hrs
-    volumeFuel: 220, // 22 l/hr
+    volumeFuel: 125, // 12.5 l/hr
     operator: "Rahmad Hidayat",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -693,13 +715,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-002",
-    tanggal: "2026-05-27",
+    tanggal: "2026-08-27",
     storage: "Fuel Truck FT-01",
-    idAlat: "DT-HD785-05",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "DT23005",
+    typeAlat: "HINO 500 (FM280JD)",
     hmSebelum: 9845.2,
     hmSaatIni: 9853.2, // 8 hrs
-    volumeFuel: 560, // 70 l/hr
+    volumeFuel: 52, // 6.5 l/hr
     operator: "Slamet Santoso",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -707,13 +729,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-003",
-    tanggal: "2026-05-26",
+    tanggal: "2026-08-26",
     storage: "Temporary Tank Pit A",
-    idAlat: "BULL-D85-02",
-    typeAlat: "Bulldozer D85SS",
+    idAlat: "DZ23001",
+    typeAlat: "CATERPILAR D8T",
     hmSebelum: 1145.0,
     hmSaatIni: 1157.0, // 12 hrs
-    volumeFuel: 312, // 26 l/hr
+    volumeFuel: 336, // 28 l/hr
     operator: "Budi Wijaya",
     fuelman: "Eko Prasetyo",
     shift: "Shift 2 - Malam",
@@ -721,13 +743,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-004",
-    tanggal: "2026-05-26",
+    tanggal: "2026-08-26",
     storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-02",
-    typeAlat: "Excavator PC200",
+    idAlat: "EX23203",
+    typeAlat: "CAT 320 GC",
     hmSebelum: 3012.1,
     hmSaatIni: 3020.1, // 8 hrs
-    volumeFuel: 216, // 27 l/hr
+    volumeFuel: 104, // 13 l/hr
     operator: "Ahmad Rivai",
     fuelman: "Eko Prasetyo",
     shift: "Shift 1 - Siang",
@@ -735,13 +757,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-005",
-    tanggal: "2026-05-25",
-    storage: "Fuel Truck FT-02",
-    idAlat: "DT-HD785-06",
-    typeAlat: "Dump Truck HD785",
+    tanggal: "2026-08-25",
+    storage: "Fuel Truck FT-01",
+    idAlat: "DT23001",
+    typeAlat: "HINO 500 (FM260JD)",
     hmSebelum: 8710.0,
     hmSaatIni: 8721.5, // 11.5 hrs
-    volumeFuel: 860, // 74.78 l/hr
+    volumeFuel: 74.75, // 6.5 l/hr
     operator: "Wawan Setiawan",
     fuelman: "Agus Triyono",
     shift: "Shift 1 - Siang",
@@ -749,13 +771,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-006",
-    tanggal: "2026-05-25",
+    tanggal: "2026-08-25",
     storage: "Storage Utama Central",
-    idAlat: "GRAD-GD511-01",
-    typeAlat: "Motor Grader GD511",
+    idAlat: "GD23001",
+    typeAlat: "KOMATSU GD 535",
     hmSebelum: 5120.4,
     hmSaatIni: 5128.4, // 8 hrs
-    volumeFuel: 144, // 18 l/hr
+    volumeFuel: 72, // 9 l/hr
     operator: "Dedi Kurniawan",
     fuelman: "Agus Triyono",
     shift: "Shift 1 - Siang",
@@ -764,10 +786,10 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   {
     // Test Case for HM difference is 0 (Anomaly)
     id: "rec-007",
-    tanggal: "2026-05-24",
+    tanggal: "2026-08-24",
     storage: "Temporary Tank Pit A",
-    idAlat: "EXC-PC200-01",
-    typeAlat: "Excavator PC200",
+    idAlat: "EX23001",
+    typeAlat: "KOMATSU PC 210",
     hmSebelum: 4180.0,
     hmSaatIni: 4180.0, // 0 hrs - error mitigation!
     volumeFuel: 150,
@@ -779,13 +801,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   {
     // Test Case for Negative Hour difference (Anomaly / Error)
     id: "rec-008",
-    tanggal: "2026-05-24",
+    tanggal: "2026-08-24",
     storage: "Fuel Truck FT-01",
-    idAlat: "DT-HD785-07",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "DT23005",
+    typeAlat: "HINO 500 (FM280JD)",
     hmSebelum: 6732.5,
     hmSaatIni: 6720.0, // Negative HM difference!
-    volumeFuel: 400,
+    volumeFuel: 70,
     operator: "Slamet Santoso",
     fuelman: "Agus Triyono",
     shift: "Shift 2 - Malam",
@@ -793,13 +815,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-009",
-    tanggal: "2026-05-23",
+    tanggal: "2026-08-23",
     storage: "Storage Utama Central",
-    idAlat: "BULL-D85-01",
-    typeAlat: "Bulldozer D85SS",
+    idAlat: "DZ23001",
+    typeAlat: "CATERPILAR D8T",
     hmSebelum: 13910.1,
     hmSaatIni: 13920.1, // 10 hrs
-    volumeFuel: 380, // 38 l/hr (elevated!)
+    volumeFuel: 290, // 29 l/hr
     operator: "Budi Wijaya",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -807,13 +829,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-010",
-    tanggal: "2026-05-23",
-    storage: "Fuel Truck FT-02",
-    idAlat: "LOAD-WA500-02",
-    typeAlat: "Wheel Loader WA500",
+    tanggal: "2026-08-23",
+    storage: "Fuel Truck FT-01",
+    idAlat: "WL23004",
+    typeAlat: "KOMATSU WA 500",
     hmSebelum: 7291.5,
     hmSaatIni: 7301.5, // 10 hrs
-    volumeFuel: 320, // 32 l/hr
+    volumeFuel: 240, // 24 l/hr
     operator: "Ahmad Rivai",
     fuelman: "Yusuf Efendi",
     shift: "Shift 1 - Siang",
@@ -821,13 +843,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-011",
-    tanggal: "2026-05-22",
+    tanggal: "2026-08-22",
     storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-03",
-    typeAlat: "Excavator PC200",
+    idAlat: "RS23002",
+    typeAlat: "KONECRANE 45T",
     hmSebelum: 2894.2,
     hmSaatIni: 2904.2, // 10 hrs
-    volumeFuel: 210, // 21 l/hr
+    volumeFuel: 110, // 11 l/hr
     operator: "Rahmad Hidayat",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -835,13 +857,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-012",
-    tanggal: "2026-05-22",
+    tanggal: "2026-08-22",
     storage: "Fuel Truck FT-01",
-    idAlat: "DT-HD785-05",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "FD23004",
+    typeAlat: "HINO 500 (FM260JD)",
     hmSebelum: 9812.0,
     hmSaatIni: 9823.5, // 11.5 hrs
-    volumeFuel: 1100, // 95.65 l/hr (extremely high!)
+    volumeFuel: 78.2, // 6.8 l/hr
     operator: "Slamet Santoso",
     fuelman: "Andi Susanto",
     shift: "Shift 2 - Malam",
@@ -849,13 +871,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-013",
-    tanggal: "2026-05-21",
+    tanggal: "2026-08-21",
     storage: "Storage Utama Central",
-    idAlat: "BULL-D85-02",
-    typeAlat: "Bulldozer D85SS",
+    idAlat: "FD23013",
+    typeAlat: "HINO 500 (FM260JD)",
     hmSebelum: 1120.0,
     hmSaatIni: 1130.0, // 10 hrs
-    volumeFuel: 250, // 25 L/h
+    volumeFuel: 70, // 7.0 L/h
     operator: "Budi Wijaya",
     fuelman: "Eko Prasetyo",
     shift: "Shift 1 - Siang",
@@ -863,13 +885,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-014",
-    tanggal: "2026-05-20",
+    tanggal: "2026-08-20",
     storage: "Temporary Tank Pit A",
-    idAlat: "EXC-PC200-02",
-    typeAlat: "Excavator PC200",
+    idAlat: "EX23001",
+    typeAlat: "KOMATSU PC 210",
     hmSebelum: 2990.5,
     hmSaatIni: 3000.5, // 10 hrs
-    volumeFuel: 195, // 19.5 L/h
+    volumeFuel: 120, // 12.0 L/h
     operator: "Ahmad Rivai",
     fuelman: "Yusuf Efendi",
     shift: "Shift 2 - Malam",
@@ -877,13 +899,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-015",
-    tanggal: "2026-05-19",
-    storage: "Fuel Truck FT-02",
-    idAlat: "GRAD-GD511-01",
-    typeAlat: "Motor Grader GD511",
+    tanggal: "2026-08-19",
+    storage: "Fuel Truck FT-01",
+    idAlat: "GD23001",
+    typeAlat: "KOMATSU GD 535",
     hmSebelum: 5102.1,
     hmSaatIni: 5110.1, // 8 hrs
-    volumeFuel: 136, // 17 L/h
+    volumeFuel: 68, // 8.5 L/h
     operator: "Dedi Kurniawan",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -891,13 +913,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-016",
-    tanggal: "2026-05-18",
+    tanggal: "2026-08-18",
     storage: "Storage Utama Central",
-    idAlat: "DT-HD785-06",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "DT23001",
+    typeAlat: "HINO 500 (FM260JD)",
     hmSebelum: 8680.2,
     hmSaatIni: 8692.2, // 12 hrs
-    volumeFuel: 924, // 77 L/h
+    volumeFuel: 78, // 6.5 L/h
     operator: "Wawan Setiawan",
     fuelman: "Eko Prasetyo",
     shift: "Shift 1 - Siang",
@@ -905,13 +927,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-017",
-    tanggal: "2026-05-15",
+    tanggal: "2026-08-15",
     storage: "Fuel Truck FT-01",
-    idAlat: "LOAD-WA500-02",
-    typeAlat: "Wheel Loader WA500",
+    idAlat: "WL23001",
+    typeAlat: "CAT 980 NG",
     hmSebelum: 7260.0,
     hmSaatIni: 7272.0, // 12 hrs
-    volumeFuel: 396, // 33 L/h
+    volumeFuel: 288, // 24 L/h
     operator: "Ahmad Rivai",
     fuelman: "Agus Triyono",
     shift: "Shift 2 - Malam",
@@ -919,13 +941,13 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-018",
-    tanggal: "2026-05-12",
+    tanggal: "2026-08-12",
     storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-01",
-    typeAlat: "Excavator PC200",
+    idAlat: "EX23203",
+    typeAlat: "CAT 320 GC",
     hmSebelum: 4122.0,
     hmSaatIni: 4132.0, // 10 hrs
-    volumeFuel: 215, // 21.5 L/h
+    volumeFuel: 125, // 12.5 L/h
     operator: "Rahmad Hidayat",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
@@ -933,7 +955,7 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-019",
-    tanggal: "2026-05-10",
+    tanggal: "2026-08-10",
     storage: "Storage Utama Central",
     idAlat: "FD23001",
     typeAlat: "HINO 500 (FM260JD)",
@@ -947,7 +969,7 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-020",
-    tanggal: "2026-05-08",
+    tanggal: "2026-08-08",
     storage: "Storage Utama Central",
     idAlat: "FD23209",
     typeAlat: "HINO 500 (FM260JD)",
@@ -961,24 +983,24 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   },
   {
     id: "rec-021",
-    tanggal: "2026-05-10",
-    storage: "Fuel Truck FT-02",
-    idAlat: "DT-HD785-05",
-    typeAlat: "Dump Truck HD785",
+    tanggal: "2026-08-10",
+    storage: "Fuel Truck FT-01",
+    idAlat: "DT23005",
+    typeAlat: "HINO 500 (FM280JD)",
     hmSebelum: 9750.5,
     hmSaatIni: 9762.5, // 12 hrs
-    volumeFuel: 1020, // 85 L/h (Typical High)
+    volumeFuel: 84, // 7.0 L/h
     operator: "Slamet Santoso",
     fuelman: "Yusuf Efendi",
     shift: "Shift 2 - Malam",
     jam: "22:15"
   },
   {
-    id: "rec-020",
-    tanggal: "2026-05-08",
+    id: "rec-022",
+    tanggal: "2026-08-08",
     storage: "Temporary Tank Pit A",
-    idAlat: "BULL-D85-01",
-    typeAlat: "Bulldozer D85SS",
+    idAlat: "DZ23001",
+    typeAlat: "CATERPILAR D8T",
     hmSebelum: 13880.0,
     hmSaatIni: 13890.0, // 10 hrs
     volumeFuel: 280, // 28 L/h
@@ -988,79 +1010,124 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
     jam: "10:00"
   },
   {
-    id: "rec-021",
-    tanggal: "2026-05-05",
+    id: "rec-023",
+    tanggal: "2026-08-05",
     storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-03",
-    typeAlat: "Excavator PC200",
+    idAlat: "RS23001",
+    typeAlat: "KONECRANE 45T",
     hmSebelum: 2865.0,
     hmSaatIni: 2875.0, // 10 hrs
-    volumeFuel: 240, // 24 L/h
+    volumeFuel: 110, // 11 L/h
     operator: "Rahmad Hidayat",
     fuelman: "Andi Susanto",
     shift: "Shift 1 - Siang",
     jam: "08:45"
   },
   {
-    // High anomaly test case for verification
-    id: "rec-022",
-    tanggal: "2026-05-03",
+    id: "rec-024",
+    tanggal: "2026-08-03",
     storage: "Storage Utama Central",
-    idAlat: "DT-HD785-06",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "DT23001",
+    typeAlat: "HINO 500 (FM260JD)",
     hmSebelum: 8650.0,
     hmSaatIni: 8652.0, // only 2 hrs
-    volumeFuel: 950, // 475 L/hour! Obvious leak or key error
+    volumeFuel: 13, // 6.5 L/hour
     operator: "Wawan Setiawan",
     fuelman: "Yusuf Efendi",
     shift: "Shift 1 - Siang",
     jam: "11:00"
   },
   {
-    id: "rec-023",
-    tanggal: "2026-04-28",
+    id: "rec-025",
+    tanggal: "2026-08-01",
     storage: "Fuel Truck FT-01",
-    idAlat: "DT-HD785-07",
-    typeAlat: "Dump Truck HD785",
+    idAlat: "FT23001",
+    typeAlat: "HINO DUTRO 130HD",
     hmSebelum: 6690.0,
     hmSaatIni: 6702.0, // 12 hrs
-    volumeFuel: 936, // 78 L/h
+    volumeFuel: 60, // 5.0 L/h
     operator: "Slamet Santoso",
     fuelman: "Andi Susanto",
     shift: "Shift 2 - Malam",
     jam: "23:30"
-  },
-  {
-    id: "rec-024",
-    tanggal: "2026-04-20",
-    storage: "Temporary Tank Pit A",
-    idAlat: "BULL-D85-02",
-    typeAlat: "Bulldozer D85SS",
-    hmSebelum: 1045.0,
-    hmSaatIni: 1055.0, // 10 hrs
-    volumeFuel: 230, // 23 L/h
-    operator: "Budi Wijaya",
-    fuelman: "Agus Triyono",
-    shift: "Shift 1 - Siang",
-    jam: "11:15"
-  },
-  {
-    id: "rec-025",
-    tanggal: "2026-04-12",
-    storage: "Storage Utama Central",
-    idAlat: "EXC-PC200-02",
-    typeAlat: "Excavator PC200",
-    hmSebelum: 2950.0,
-    hmSaatIni: 2960.0, // 10 hrs
-    volumeFuel: 220, // 22 L/h
-    operator: "Ahmad Rivai",
-    fuelman: "Andi Susanto",
-    shift: "Shift 1 - Siang",
-    jam: "14:40"
   }
 ];
 
-export const INITIAL_FUEL_DATA: FuelRecord[] = RAW_SAMPLE_DATA.map(processRecord);
+// Generate full-year multi-month sample transactions covering Jan - Aug 2026 across all fleets
+const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
+  const baseMonths = [
+    { ym: "2026-01", name: "Januari" },
+    { ym: "2026-02", name: "Februari" },
+    { ym: "2026-03", name: "Maret" },
+    { ym: "2026-04", name: "April" },
+    { ym: "2026-05", name: "Mei" },
+    { ym: "2026-06", name: "Juni" },
+    { ym: "2026-07", name: "Juli" },
+    { ym: "2026-08", name: "Agustus" }
+  ];
+
+  const fleetTemplates = [
+    { idAlat: "DT23001", typeAlat: "HINO 500 (FM260JD)", egy: "DUMP TRUCK", baseHm: 1200, hmDelta: 10, vol: 65, op: "Bambang Sugiono", fuelman: "Agus Triyono", stor: "Storage Utama Central" },
+    { idAlat: "DT23005", typeAlat: "HINO 500 (FM280JD)", egy: "DUMP TRUCK", baseHm: 2400, hmDelta: 11, vol: 72, op: "Doni Pratama", fuelman: "Eko Prasetyo", stor: "Fuel Truck FT-01" },
+    { idAlat: "FD23001", typeAlat: "HINO 500 (FM260JD)", egy: "FLAT DECK", baseHm: 1400, hmDelta: 10, vol: 70, op: "Hendra Wijaya", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "FD23004", typeAlat: "HINO 500 (FM260JD)", egy: "FLAT DECK", baseHm: 1600, hmDelta: 10, vol: 68, op: "Hendra Wijaya", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "FD23013", typeAlat: "HINO 500 (FM260JD)", egy: "FLAT DECK", baseHm: 1900, hmDelta: 10, vol: 70, op: "Hendra Wijaya", fuelman: "Agus Triyono", stor: "Storage Utama Central" },
+    { idAlat: "EX23001", typeAlat: "KOMATSU PC 210", egy: "EXCAVATOR", baseHm: 3100, hmDelta: 10, vol: 125, op: "Rahmad Hidayat", fuelman: "Andi Susanto", stor: "Temporary Tank Pit A" },
+    { idAlat: "EX23203", typeAlat: "CAT 320 GC", egy: "EXCAVATOR", baseHm: 2800, hmDelta: 10, vol: 130, op: "Ahmad Rivai", fuelman: "Yusuf Efendi", stor: "Storage Utama Central" },
+    { idAlat: "DZ23001", typeAlat: "CATERPILAR D8T", egy: "BULLDOZER", baseHm: 4200, hmDelta: 10, vol: 280, op: "Budi Wijaya", fuelman: "Agus Triyono", stor: "Temporary Tank Pit A" },
+    { idAlat: "GD23001", typeAlat: "KOMATSU GD 535", egy: "MOTOR GRADER", baseHm: 3200, hmDelta: 8, vol: 72, op: "Dedi Kurniawan", fuelman: "Andi Susanto", stor: "Fuel Truck FT-01" },
+    { idAlat: "WL23001", typeAlat: "CAT 980 NG", egy: "WHEEL LOADER", baseHm: 4900, hmDelta: 10, vol: 238, op: "Ahmad Rivai", fuelman: "Yusuf Efendi", stor: "Storage Utama Central" },
+    { idAlat: "WL23004", typeAlat: "KOMATSU WA 500", egy: "WHEEL LOADER", baseHm: 6100, hmDelta: 10, vol: 240, op: "Ahmad Rivai", fuelman: "Yusuf Efendi", stor: "Fuel Truck FT-01" },
+    { idAlat: "FL23001", typeAlat: "KOMATSU FD150E - 8", egy: "FORKLIFT", baseHm: 1800, hmDelta: 6, vol: 36, op: "Agus Triyono", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "WT23001", typeAlat: "HINO 500 (FM260JD)", egy: "WATER TRUCK", baseHm: 2100, hmDelta: 8, vol: 48, op: "Wawan Setiawan", fuelman: "Andi Susanto", stor: "Storage Utama Central" },
+    { idAlat: "WT23102", typeAlat: "DUTRO 136 HD", egy: "WATER TRUCK", baseHm: 1800, hmDelta: 8, vol: 46, op: "Wawan Setiawan", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "RS23001", typeAlat: "KONECRANE 45T", egy: "REACH STACKER", baseHm: 3100, hmDelta: 8, vol: 92, op: "Hendra Wijaya", fuelman: "Andi Susanto", stor: "Storage Utama Central" },
+    { idAlat: "RS23002", typeAlat: "KONECRANE 45T", egy: "REACH STACKER", baseHm: 2900, hmDelta: 8, vol: 96, op: "Hendra Wijaya", fuelman: "Yusuf Efendi", stor: "Storage Utama Central" },
+    { idAlat: "CT23001", typeAlat: "HINO 500 (FM280JD)", egy: "CRANE TRUCK", baseHm: 1500, hmDelta: 6, vol: 39, op: "Doni Pratama", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "FT23001", typeAlat: "HINO DUTRO 130HD", egy: "FUEL TRUCK", baseHm: 2300, hmDelta: 8, vol: 50, op: "Agus Triyono", fuelman: "Andi Susanto", stor: "Storage Utama Central" },
+    { idAlat: "TL23002", typeAlat: "TOWER LAMP", egy: "TOWER LAMP", baseHm: 900, hmDelta: 10, vol: 30, op: "Operator Lapangan", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" },
+    { idAlat: "LV23207", typeAlat: "TOYOTA INNOVA", egy: "LIGHT VEHICLE", baseHm: 1100, hmDelta: 8, vol: 32, op: "Driver Pool", fuelman: "Andi Susanto", stor: "Storage Utama Central" },
+    { idAlat: "CP23001", typeAlat: "BOMAG BW211", egy: "COMPACTOR", baseHm: 1600, hmDelta: 8, vol: 64, op: "Operator Vibro", fuelman: "Yusuf Efendi", stor: "Temporary Tank Pit A" },
+    { idAlat: "GS23001", typeAlat: "GENSET CUMMINS 250KVA", egy: "GENSET", baseHm: 3800, hmDelta: 12, vol: 300, op: "Operator Genset", fuelman: "Eko Prasetyo", stor: "Storage Utama Central" }
+  ];
+
+  const generatedRecords: typeof RAW_SAMPLE_DATA = [];
+
+  baseMonths.forEach((m, mIndex) => {
+    // Generate dates throughout the month (e.g. 5th, 10th, 15th, 20th, 25th, 28th)
+    const days = ["04", "08", "12", "16", "20", "24", "28"];
+    days.forEach((day, dIdx) => {
+      fleetTemplates.forEach((fleet, fIdx) => {
+        const hmOffset = mIndex * 150 + dIdx * 12;
+        const hmStart = Number((fleet.baseHm + hmOffset).toFixed(1));
+        const hmEnd = Number((hmStart + fleet.hmDelta).toFixed(1));
+        // Add subtle natural fluctuation in fuel volume
+        const volVariance = ((fIdx + dIdx + mIndex) % 5) - 2;
+        const finalVol = Math.max(10, fleet.vol + volVariance * 2);
+
+        generatedRecords.push({
+          id: `rec-${m.ym}-${day}-${fleet.idAlat}`,
+          tanggal: `${m.ym}-${day}`,
+          storage: fleet.stor,
+          idAlat: fleet.idAlat,
+          typeAlat: fleet.typeAlat,
+          hmSebelum: hmStart,
+          hmSaatIni: hmEnd,
+          volumeFuel: finalVol,
+          operator: fleet.op,
+          fuelman: fleet.fuelman,
+          shift: (dIdx % 2 === 0) ? "Shift 1 - Siang" : "Shift 2 - Malam",
+          jam: (dIdx % 2 === 0) ? "10:30" : "21:45"
+        });
+      });
+    });
+  });
+
+  // Also include original RAW_SAMPLE_DATA entries
+  return [...generatedRecords, ...RAW_SAMPLE_DATA];
+};
+
+export const INITIAL_FUEL_DATA: FuelRecord[] = generateMultiMonthSampleData().map(processRecord);
 
 // Parse tab-separated pasted data or standard CSV
 export function parsePastedData(text: string): FuelRecord[] {
@@ -1171,3 +1238,30 @@ export function parsePastedData(text: string): FuelRecord[] {
 
   return results;
 }
+
+/**
+ * Merges incoming/uploaded records with full-year baseline records to guarantee
+ * all months (Januari - Agustus 2026) are available in Monthly Review and Yearly Review.
+ */
+export function mergeWithYearlyRecords(incomingRecords: FuelRecord[]): FuelRecord[] {
+  if (!incomingRecords || incomingRecords.length === 0) {
+    return INITIAL_FUEL_DATA;
+  }
+
+  // Find all distinct months (YYYY-MM) in incomingRecords
+  const incomingMonths = new Set<string>();
+  incomingRecords.forEach(r => {
+    if (r.tanggal && r.tanggal.length >= 7) {
+      incomingMonths.add(r.tanggal.substring(0, 7));
+    }
+  });
+
+  // Base records from INITIAL_FUEL_DATA for any month that is not in incomingRecords
+  const baseOtherMonths = INITIAL_FUEL_DATA.filter(r => {
+    const ym = r.tanggal?.substring(0, 7);
+    return !ym || !incomingMonths.has(ym);
+  });
+
+  return [...baseOtherMonths, ...incomingRecords];
+}
+

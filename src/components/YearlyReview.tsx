@@ -31,7 +31,8 @@ import {
   saveJulyBenchmarkRegistry, 
   getJulyBenchmarkRegistry,
   MASTER_JULY_BENCHMARKS,
-  MONTH_NAMES_IND
+  MONTH_NAMES_IND,
+  KNOWN_CANONICAL_EGY
 } from "../data/sampleData";
 import UploadAnalysisModal, { 
   AnalyzedUploadResult, 
@@ -43,6 +44,7 @@ import {
   subscribeToMonthlyReports, 
   fetchAllMonthlyReports,
   saveMonthlyReportToFirestore, 
+  saveActiveDatasetToFirestore,
   deleteMonthlyReport, 
   testConnection 
 } from "../lib/firebase";
@@ -859,6 +861,7 @@ export default function YearlyReview({
         // Parse and detect any Benchmark sheet / "List & FC" / July table (Column C: Equipment, Column D: Egy, Column E: Type)
         const egyLookup: Record<string, string> = {};
         workbook.SheetNames.forEach(sName => {
+          const sLower = sName.toLowerCase();
           const sObj = workbook.Sheets[sName];
           const rows = XLSX.utils.sheet_to_json<any[]>(sObj, { header: 1 });
           if (!rows || rows.length < 2) return;
@@ -867,7 +870,7 @@ export default function YearlyReview({
             if (!row || !Array.isArray(row)) return;
 
             // Case A: List & FC sheet (Col A: Unit, Col B: Type, Col C: Egy)
-            if (sName.toLowerCase().includes("list") || sName.toLowerCase().includes("fc")) {
+            if (sLower.includes("list") || sLower.includes("fc")) {
               const unitCell = row[0];
               const typeCell = row[1];
               const egyCell = row[2];
@@ -875,8 +878,11 @@ export default function YearlyReview({
                 const uId = String(unitCell).trim().toUpperCase();
                 const typeStr = typeCell ? String(typeCell).trim() : "";
                 let egyVal = egyCell !== undefined && egyCell !== null ? String(egyCell).trim() : "";
-                if (!egyVal || !isNaN(parseFloat(egyVal))) {
+                const cleanVal = cleanEgyName(egyVal);
+                if (!cleanVal || !KNOWN_CANONICAL_EGY.includes(cleanVal)) {
                   egyVal = deriveEgy(uId, typeStr);
+                } else {
+                  egyVal = cleanVal;
                 }
                 if (uId && uId !== "NOMOR UNIT" && uId !== "UNIT" && !uId.includes("TANGGAL")) {
                   egyLookup[uId] = egyVal;
@@ -885,27 +891,33 @@ export default function YearlyReview({
               }
             }
 
-            // Case B: July Benchmark structure (Col C: Equipment, Col D: Egy, Col E: Type)
-            const eqCell = row[2];  // Column C
-            const egyCell = row[3]; // Column D
-            const typeCell = row[4];// Column E
-            if (eqCell && egyCell) {
-              const eqStr = String(eqCell).trim().toUpperCase();
-              const egyStr = String(egyCell).trim();
-              const typeStr = typeCell ? String(typeCell).trim() : "";
-              if (
-                eqStr && 
-                !eqStr.includes("EQUIPMENT") && 
-                !eqStr.includes("UNIT") && 
-                !eqStr.includes("NO") && 
-                !eqStr.includes("TANGGAL") &&
-                egyStr &&
-                !egyStr.includes("EGY") &&
-                isNaN(parseFloat(egyStr))
-              ) {
-                const cleanEgy = cleanEgyName(egyStr);
-                egyLookup[eqStr] = cleanEgy;
-                saveJulyBenchmarkRegistry({ [eqStr]: { egy: cleanEgy, type: typeStr } });
+            // Case B: ONLY in explicit Benchmark / Master / Patokan sheets (Col C: Equipment, Col D: Egy, Col E: Type)
+            // Strictly exclude transaction log sheets (like Issued, Log, Juni, Mei, dll)
+            const isExplicitBenchmarkSheet = sLower.includes("benchmark") || sLower.includes("master") || sLower.includes("patokan") || (sLower.includes("juli") && sLower.includes("plan"));
+            if (isExplicitBenchmarkSheet) {
+              const eqCell = row[2];  // Column C
+              const egyCell = row[3]; // Column D
+              const typeCell = row[4];// Column E
+              if (eqCell && egyCell) {
+                const eqStr = String(eqCell).trim().toUpperCase();
+                const egyStr = String(egyCell).trim();
+                const typeStr = typeCell ? String(typeCell).trim() : "";
+                if (
+                  eqStr && 
+                  !eqStr.includes("EQUIPMENT") && 
+                  !eqStr.includes("UNIT") && 
+                  !eqStr.includes("NO") && 
+                  !eqStr.includes("TANGGAL") &&
+                  egyStr &&
+                  !egyStr.includes("EGY") &&
+                  isNaN(parseFloat(egyStr))
+                ) {
+                  const cleanEgy = cleanEgyName(egyStr);
+                  if (cleanEgy && KNOWN_CANONICAL_EGY.includes(cleanEgy)) {
+                    egyLookup[eqStr] = cleanEgy;
+                    saveJulyBenchmarkRegistry({ [eqStr]: { egy: cleanEgy, type: typeStr } });
+                  }
+                }
               }
             }
           });
@@ -1354,17 +1366,23 @@ export default function YearlyReview({
             };
           }).sort((a, b) => b.totalVolume - a.totalVolume);
 
-        // Find dominant month from entries
+        // Find dominant month and multi-month breakdown from entries
+        const monthBreakdown: Record<string, { totalVolume: number; totalHours: number; count: number }> = {};
+        parsedEntries.forEach(p => {
+          if (!monthBreakdown[p.bulan]) {
+            monthBreakdown[p.bulan] = { totalVolume: 0, totalHours: 0, count: 0 };
+          }
+          monthBreakdown[p.bulan].totalVolume += p.totalVolume;
+          monthBreakdown[p.bulan].totalHours += p.totalHours;
+          monthBreakdown[p.bulan].count += p.recordCount;
+        });
+
         let dominantMonth = selectedMonthForUpload || "Juli";
         if (!selectedMonthForUpload) {
-          const monthFreq: Record<string, number> = {};
-          parsedEntries.forEach(p => {
-            monthFreq[p.bulan] = (monthFreq[p.bulan] || 0) + p.recordCount;
-          });
           let maxFreq = 0;
-          Object.entries(monthFreq).forEach(([mName, freq]) => {
-            if (freq > maxFreq) {
-              maxFreq = freq;
+          Object.entries(monthBreakdown).forEach(([mName, stat]) => {
+            if (stat.count > maxFreq) {
+              maxFreq = stat.count;
               dominantMonth = mName;
             }
           });
@@ -1385,6 +1403,7 @@ export default function YearlyReview({
           avgBurnRate: overallBurn,
           egySummaries,
           unitDetails,
+          multiMonthMap: monthBreakdown,
           rawPayload: {
             parsedEntries,
             unitAggregates: Object.values(allUnitAggregates),
@@ -1420,20 +1439,27 @@ export default function YearlyReview({
       const rawPayload = stagingData.rawPayload;
       if (!rawPayload) return;
 
-      const parsedEntries = (rawPayload.parsedEntries as Array<{
+      const rawEntries = (rawPayload.parsedEntries || []) as Array<{
         bulan: string;
         typeAlat: string;
         totalVolume: number;
         totalHours: number;
         recordCount: number;
-      }>).map(p => ({
+      }>;
+
+      // Group entries by month. If the file has multiple months detected from row dates, keep them separate;
+      // If user selected a specific month override or single month, use confirmedMonth.
+      const distinctMonths = Array.from(new Set(rawEntries.map(e => e.bulan))).filter(Boolean);
+      const isMultiMonthFile = !selectedMonthForUpload && distinctMonths.length > 1;
+
+      const entriesToProcess = rawEntries.map(p => ({
         ...p,
-        bulan: confirmedMonth // Align all parsed entries to the confirmed month
+        bulan: isMultiMonthFile ? p.bulan : confirmedMonth
       }));
 
-      // Group and aggregate parsedEntries by (bulan, typeAlat) to avoid duplicates
-      const map: Record<string, typeof parsedEntries[0]> = {};
-      parsedEntries.forEach(p => {
+      // Group and aggregate entries by (bulan, typeAlat)
+      const map: Record<string, typeof entriesToProcess[0]> = {};
+      entriesToProcess.forEach(p => {
         const k = `${p.bulan}__${p.typeAlat}`;
         if (!map[k]) {
           map[k] = { ...p };
@@ -1450,82 +1476,112 @@ export default function YearlyReview({
         totalHours: Number(p.totalHours.toFixed(1))
       }));
 
-      // Prepare Firestore payload
-      const mTotalVol = aggregatedParsed.reduce((sum, p) => sum + p.totalVolume, 0);
-      const mTotalHrs = aggregatedParsed.reduce((sum, p) => sum + p.totalHours, 0);
-      const mRecordCount = aggregatedParsed.reduce((sum, p) => sum + p.recordCount, 0);
-      const mIdx = getMonthFromText(confirmedMonth);
+      // Extract all months that are affected
+      const affectedMonths = isMultiMonthFile ? distinctMonths : [confirmedMonth];
 
-      const unitSummaries = (stagingData.unitDetails || []).map(u => ({
-        idAlat: u.idAlat,
-        egy: u.egy,
-        typeAlat: u.typeAlat,
-        totalVolume: u.totalVolume,
-        totalHours: u.totalHours,
-        burnRate: u.burnRate,
-        recordCount: u.recordCount
-      }));
+      const rawLogs = (rawPayload.rawFuelRecords && Array.isArray(rawPayload.rawFuelRecords))
+        ? (rawPayload.rawFuelRecords as FuelRecord[])
+        : [];
 
-      const reportPayload: MonthlyReportData = {
-        id: `2026_${confirmedMonth}`,
-        bulan: confirmedMonth,
-        monthIndex: mIdx !== -1 ? mIdx : 0,
-        year: 2026,
-        fileName: stagingData.fileName,
-        uploadedAt: new Date().toISOString(),
-        totalVolume: Number(mTotalVol.toFixed(1)),
-        totalHours: Number(mTotalHrs.toFixed(1)),
-        recordCount: mRecordCount,
-        avgBurnRate: mTotalHrs > 0 ? Number((mTotalVol / mTotalHrs).toFixed(2)) : 0,
-        typeSummaries: aggregatedParsed.map(p => ({
-          egy: p.typeAlat,
-          typeAlat: p.typeAlat,
-          totalVolume: p.totalVolume,
-          totalHours: p.totalHours,
-          recordCount: p.recordCount,
-          burnRate: p.totalHours > 0 ? Number((p.totalVolume / p.totalHours).toFixed(2)) : 0
-        })),
-        unitSummaries
-      };
+      // If not a multi-month file, ensure all logs match the confirmed month
+      const alignedLogs = rawLogs.map(r => {
+        if (!isMultiMonthFile) {
+          const targetMonthIndex = getMonthFromText(confirmedMonth);
+          const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "08";
+          if (!r.tanggal.includes(`-${targetMonthPad}-`)) {
+            const parts = r.tanggal.split("-");
+            const dayPart = parts.length === 3 ? parts[2] : "15";
+            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
+          }
+        }
+        return r;
+      });
 
-      try {
-        await saveMonthlyReportToFirestore(reportPayload);
-      } catch (cloudErr) {
-        console.warn("Penyimpanan Firestore backend notice:", cloudErr);
+      // Save each affected month to Cloud Firestore
+      for (const mName of affectedMonths) {
+        const monthEntries = aggregatedParsed.filter(p => p.bulan === mName);
+        const mTotalVol = monthEntries.reduce((sum, p) => sum + p.totalVolume, 0);
+        const mTotalHrs = monthEntries.reduce((sum, p) => sum + p.totalHours, 0);
+        const mRecordCount = monthEntries.reduce((sum, p) => sum + p.recordCount, 0);
+        const mIdx = getMonthFromText(mName);
+        const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
+
+        // Extract transaction records specific to this month
+        const monthRecords = alignedLogs.filter(r => mPad && r.tanggal.startsWith(`2026-${mPad}`));
+
+        const unitSummaries = (stagingData.unitDetails || []).map(u => ({
+          idAlat: u.idAlat,
+          egy: u.egy,
+          typeAlat: u.typeAlat,
+          totalVolume: u.totalVolume,
+          totalHours: u.totalHours,
+          burnRate: u.burnRate,
+          recordCount: u.recordCount
+        }));
+
+        const reportPayload: MonthlyReportData = {
+          id: `2026_${mName}`,
+          bulan: mName,
+          monthIndex: mIdx !== -1 ? mIdx : 0,
+          year: 2026,
+          fileName: stagingData.fileName,
+          uploadedAt: new Date().toISOString(),
+          totalVolume: Number(mTotalVol.toFixed(1)),
+          totalHours: Number(mTotalHrs.toFixed(1)),
+          recordCount: mRecordCount,
+          avgBurnRate: mTotalHrs > 0 ? Number((mTotalVol / mTotalHrs).toFixed(2)) : 0,
+          typeSummaries: monthEntries.map(p => ({
+            egy: p.typeAlat,
+            typeAlat: p.typeAlat,
+            totalVolume: p.totalVolume,
+            totalHours: p.totalHours,
+            recordCount: p.recordCount,
+            burnRate: p.totalHours > 0 ? Number((p.totalVolume / p.totalHours).toFixed(2)) : 0
+          })),
+          unitSummaries,
+          records: monthRecords.length > 0 ? monthRecords : undefined
+        };
+
+        try {
+          await saveMonthlyReportToFirestore(reportPayload);
+        } catch (cloudErr) {
+          console.warn(`Penyimpanan Firestore backend notice untuk ${mName}:`, cloudErr);
+        }
       }
 
-      // Merge into local state & storage
-      const clean = dataPoints.filter(d => d.bulan !== confirmedMonth);
+      // Update benchmark registry for all detected equipment IDs to synchronize all months (Jan-Jul & onwards)
+      if (stagingData.unitDetails && stagingData.unitDetails.length > 0) {
+        const newRegistryEntries: Record<string, { egy: string; type?: string }> = {};
+        stagingData.unitDetails.forEach(u => {
+          if (u.idAlat && u.egy) {
+            newRegistryEntries[u.idAlat] = { egy: u.egy, type: u.typeAlat };
+          }
+        });
+        saveJulyBenchmarkRegistry(newRegistryEntries);
+      }
+
+      // Merge into local state & storage for Yearly Review
+      const clean = dataPoints.filter(d => !affectedMonths.includes(d.bulan));
       const nextPts = [...clean, ...aggregatedParsed];
-      const nextMonths = uploadedMonths.includes(confirmedMonth)
-        ? uploadedMonths
-        : [...uploadedMonths, confirmedMonth];
+      const nextMonths = Array.from(new Set([...uploadedMonths, ...affectedMonths]));
 
       setDataPoints(nextPts);
       setUploadedMonths(nextMonths);
       saveLocalData("yearly_data_points", nextPts);
       saveLocalData("yearly_uploaded_months", nextMonths);
 
-      // Merge raw transaction logs into global fuel_records so Monthly Review can analyze any month
-      if (rawPayload.rawFuelRecords && Array.isArray(rawPayload.rawFuelRecords) && rawPayload.rawFuelRecords.length > 0) {
+      // Merge raw transaction logs into global fuel_records so Monthly Review can analyze ANY and ALL months immediately
+      if (alignedLogs.length > 0) {
         const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
-        const targetMonthIndex = getMonthFromText(confirmedMonth);
-        const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "";
 
-        // Align raw records dates with confirmed month if needed
-        const alignedLogs = (rawPayload.rawFuelRecords as FuelRecord[]).map(r => {
-          if (targetMonthPad && !r.tanggal.includes(`-${targetMonthPad}-`)) {
-            const parts = r.tanggal.split("-");
-            const dayPart = parts.length === 3 ? parts[2] : "15";
-            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
-          }
-          return r;
-        });
-
-        // Filter out existing logs of this month to prevent duplicate stacking
+        // Filter out existing logs for affected months to prevent duplicate stacking
         const existingFiltered = currentSavedRecords.filter(r => {
-          if (!targetMonthPad) return true;
-          return !r.tanggal.startsWith(`2026-${targetMonthPad}`);
+          if (!r.tanggal) return true;
+          return !affectedMonths.some(mName => {
+            const mIdx = getMonthFromText(mName);
+            const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
+            return mPad && r.tanggal.startsWith(`2026-${mPad}`);
+          });
         });
 
         const mergedRecords = [...existingFiltered, ...alignedLogs];
@@ -1533,6 +1589,15 @@ export default function YearlyReview({
         if (onSyncRecords) {
           onSyncRecords(mergedRecords);
         }
+
+        // Persist the combined multi-month dataset directly into Firestore
+        saveActiveDatasetToFirestore({
+          records: mergedRecords,
+          plans: {},
+          startDate: "2026-01-01",
+          endDate: "2026-12-31",
+          fileName: stagingData.fileName
+        }).catch(cloudErr => console.warn("Firestore active dataset sync notice:", cloudErr));
       }
 
       setIsAnalysisModalOpen(false);
@@ -1541,7 +1606,9 @@ export default function YearlyReview({
 
       setFeedback({
         type: "success",
-        message: `Data bulan ${confirmedMonth} berhasil divalidasi dan diterapkan ke Yearly Review! (${aggregatedParsed.length} kategori tipe alat tersimpan di Cloud Firestore).`
+        message: isMultiMonthFile
+          ? `Data ${affectedMonths.length} bulan (${affectedMonths.join(", ")}) berhasil divalidasi dan disinkronkan langsung ke Monthly Review dan Yearly Review!`
+          : `Data bulan ${confirmedMonth} berhasil divalidasi dan diterapkan ke Yearly Review! (${aggregatedParsed.length} kategori tipe alat tersimpan di Cloud Firestore).`
       });
     } catch (err: any) {
       setFeedback({
@@ -1627,89 +1694,6 @@ export default function YearlyReview({
 
   return (
     <div className="space-y-6 font-sans animate-fade-in" id="yearly-review-to-export">
-      
-      {/* Upper Action Hero Card */}
-      <div className="bg-gradient-to-r from-[#1E293B] to-[#0F172A] text-white p-6 sm:p-8 rounded-2xl border border-slate-800 shadow-xl relative overflow-hidden">
-        {/* Abstract decorative graphic shape in background */}
-        <div className="absolute top-0 right-0 w-80 h-80 bg-blue-500/10 rounded-full blur-3xl pointer-events-none -mr-20 -mt-20"></div>
-        <div className="absolute bottom-0 left-1/3 w-60 h-60 bg-emerald-500/5 rounded-full blur-3xl pointer-events-none -mb-10"></div>
-
-        <div className="relative flex flex-col lg:flex-row lg:items-center lg:justify-between gap-6">
-          <div>
-            <h2 className="text-xl sm:text-2xl font-black text-white tracking-tight">
-              FUEL BURN YEARLY REVIEW
-            </h2>
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 shrink-0">
-            <button
-              onClick={triggerUploadFile}
-              disabled={isProcessing}
-              className="text-xs bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white font-black px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-emerald-400/30"
-              title="Unggah dan analisa file Excel baru sebelum ditampilkan & disimpan ke Yearly Review"
-            >
-              <Upload className="w-4 h-4 text-emerald-100" />
-              <span>Upload & Analisa File</span>
-            </button>
-
-            <button
-              onClick={handleSyncToJulyBenchmark}
-              disabled={isProcessing}
-              className="text-xs bg-[#4682B4] hover:bg-[#3b6f99] disabled:opacity-50 text-white font-black px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-blue-400/30"
-              title="Selaraskan data dari bulan Januari-Juni sesuai Egy patokan bulan Juli"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-300" />
-              <span>Sesuaikan ke Egy Juli</span>
-            </button>
-
-            <button
-              onClick={handleManualCloudRefresh}
-              disabled={isSyncingCloud}
-              className="text-xs bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-bold px-4 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-slate-700"
-              title="Tarik & sinkronkan data bulanan terbaru dari Cloud Firestore"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 text-amber-400 ${isSyncingCloud ? 'animate-spin' : ''}`} />
-              <span>{isSyncingCloud ? "Sinkronisasi..." : "Sync Cloud"}</span>
-            </button>
-
-            <button
-              onClick={exportToPdf}
-              disabled={isExportingPdf}
-              className="text-xs bg-[#E11D48] hover:bg-[#BE123C] disabled:opacity-50 text-white font-extrabold px-5 py-3 rounded-xl shadow-md transition active:scale-95 cursor-pointer flex items-center gap-2 border border-rose-400/20"
-              title="Ekspor laporan tahunan ini ke dokumen PDF"
-            >
-              <FileText className="w-4 h-4" />
-              <span>{isExportingPdf ? "Mengekspor PDF..." : "Export PDF"}</span>
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".xlsx,.xls"
-              multiple={false}
-              onChange={handleFileChange}
-              className="hidden"
-            />
-          </div>
-        </div>
-
-        {/* Feedback Alert Toast inside card for tidy layout */}
-        {feedback.message && (
-          <div className={`mt-5 p-3.5 rounded-xl text-xs flex items-center gap-2.5 max-w-4xl border ${
-            feedback.type === "success" 
-              ? "bg-emerald-500/10 border-emerald-500/25 text-emerald-300"
-              : "bg-rose-500/10 border-rose-500/25 text-rose-300"
-          }`}>
-            {feedback.type === "success" ? (
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
-            ) : (
-              <AlertTriangle className="w-4 h-4 text-rose-400 shrink-0" />
-            )}
-            <p className="font-semibold text-xs leading-normal">{feedback.message}</p>
-          </div>
-        )}
-      </div>
-
       {/* EVALUATION PERIOD FILTER DECK */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

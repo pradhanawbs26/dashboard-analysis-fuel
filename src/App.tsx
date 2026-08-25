@@ -32,7 +32,7 @@ import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 import { FuelRecord, EgyPlanMap, UnitRegistryMap } from "./types";
-import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, deriveEquipmentType } from "./data/sampleData";
+import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords } from "./data/sampleData";
 import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
@@ -56,6 +56,7 @@ import {
   saveActiveDatasetToFirestore, 
   fetchActiveDatasetFromFirestore, 
   subscribeToActiveDataset, 
+  subscribeToMonthlyReports,
   deleteActiveDatasetFromFirestore 
 } from "./lib/firebase";
 import { saveLocalData, getLocalData, getSyncLocalData, clearAllLocalData } from "./lib/storage";
@@ -97,7 +98,8 @@ const INITIAL_PLANS: Record<string, { idAlat: string; egy: string; typeAlat: str
 export default function App() {
   // Core fuel dataset state (initialized immediately from localStorage with INITIAL_FUEL_DATA fallback)
   const [records, setRecords] = useState<FuelRecord[]>(() => {
-    return getSyncLocalData<FuelRecord[]>("fuel_records", INITIAL_FUEL_DATA);
+    const local = getSyncLocalData<FuelRecord[]>("fuel_records", []);
+    return local && local.length > 0 ? mergeWithYearlyRecords(local) : INITIAL_FUEL_DATA;
   });
 
   // Plans from "List & FC" sheet (Column A: nomor unit, Column B: type alat, Column C: egy alat, Column D: plan Fuel Burn)
@@ -249,15 +251,35 @@ export default function App() {
 
   useEffect(() => {
     let isInitialLoad = true;
-    const unsubscribe = subscribeToActiveDataset(
+
+    // 1. Subscribe to active dataset in Firestore
+    const unsubscribeActive = subscribeToActiveDataset(
       (dataset) => {
         if (dataset && dataset.records && dataset.records.length > 0) {
-          setRecords(dataset.records);
+          const currentLocal = getSyncLocalData<FuelRecord[]>("fuel_records", []);
+          // Combine local records from other months with dataset records
+          const datasetMonths = new Set(dataset.records.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
+          const preservedOtherMonths = currentLocal.filter(r => {
+            const ym = r.tanggal?.substring(0, 7);
+            return ym && !datasetMonths.has(ym);
+          });
+          const combined = [...preservedOtherMonths, ...dataset.records];
+          const mergedRecords = mergeWithYearlyRecords(combined);
+
+          setRecords(mergedRecords);
           if (dataset.plans && Object.keys(dataset.plans).length > 0) {
             setPlans(dataset.plans);
           }
-          if (dataset.startDate) setStartDate(dataset.startDate);
-          if (dataset.endDate) setEndDate(dataset.endDate);
+
+          // Restore date range from fuel_meta if user selected a specific month, otherwise use dataset
+          const savedMeta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", {});
+          if (savedMeta?.startDate && savedMeta?.endDate) {
+            setStartDate(savedMeta.startDate);
+            setEndDate(savedMeta.endDate);
+          } else {
+            if (dataset.startDate) setStartDate(dataset.startDate);
+            if (dataset.endDate) setEndDate(dataset.endDate);
+          }
 
           setFirestoreSyncStatus({
             isSynced: true,
@@ -269,19 +291,13 @@ export default function App() {
           });
 
           // Sync local storage cache for instant offline fallback
-          saveLocalData("fuel_records", dataset.records);
-          saveLocalData("fuel_plans", dataset.plans);
-          saveLocalData("fuel_meta", {
-            startDate: dataset.startDate,
-            endDate: dataset.endDate,
-            fileName: dataset.fileName,
-            activeTab: "dashboard"
-          });
+          saveLocalData("fuel_records", mergedRecords);
+          if (dataset.plans) saveLocalData("fuel_plans", dataset.plans);
 
           if (isInitialLoad) {
             setFileFeedback({
               type: "success",
-              message: `Terhubung ke Firebase Firestore: Memuat dataset aktif "${dataset.fileName}" (${dataset.records.length} baris data diesel).`
+              message: `Terhubung ke Firebase Firestore: Memuat dataset aktif "${dataset.fileName}" (${mergedRecords.length} baris data diesel).`
             });
             isInitialLoad = false;
           }
@@ -293,7 +309,9 @@ export default function App() {
           });
           getLocalData<FuelRecord[]>("fuel_records").then((savedRecords) => {
             if (savedRecords && savedRecords.length > 0) {
-              setRecords(savedRecords);
+              setRecords(mergeWithYearlyRecords(savedRecords));
+            } else {
+              setRecords(INITIAL_FUEL_DATA);
             }
           });
         }
@@ -304,7 +322,37 @@ export default function App() {
       }
     );
 
-    return () => unsubscribe();
+    // 2. Also subscribe to monthly reports to recover records from any separately uploaded months (e.g. Juni, Mei)
+    const unsubscribeMonthly = subscribeToMonthlyReports((reports) => {
+      if (reports && reports.length > 0) {
+        let hasNewRecords = false;
+        const extraLogs: FuelRecord[] = [];
+        reports.forEach(rep => {
+          if (rep.records && Array.isArray(rep.records) && rep.records.length > 0) {
+            extraLogs.push(...rep.records);
+            hasNewRecords = true;
+          }
+        });
+
+        if (hasNewRecords && extraLogs.length > 0) {
+          setRecords(prev => {
+            const extraMonths = new Set(extraLogs.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
+            const filteredPrev = prev.filter(r => {
+              const ym = r.tanggal?.substring(0, 7);
+              return !ym || !extraMonths.has(ym);
+            });
+            const merged = mergeWithYearlyRecords([...filteredPrev, ...extraLogs]);
+            saveLocalData("fuel_records", merged);
+            return merged;
+          });
+        }
+      }
+    });
+
+    return () => {
+      unsubscribeActive();
+      unsubscribeMonthly();
+    };
   }, []);
 
   const handleGoogleLogin = async () => {
@@ -745,7 +793,8 @@ export default function App() {
       if (Object.keys(plansExtracted).length > 0) {
         setPlans(plansExtracted);
       }
-      setRecords(parsed);
+      const mergedParsed = mergeWithYearlyRecords(parsed);
+      setRecords(mergedParsed);
       setSelectedEgyFilter("SEMUA");
       setSelectedStorageFilter("SEMUA");
 
@@ -813,6 +862,60 @@ export default function App() {
     return Array.from(storages).sort();
   }, [records]);
 
+  // Derive unique months available across the uploaded/synced dataset
+  const availableMonths = useMemo(() => {
+    const monthsMap = new Map<string, { label: string; yearMonth: string; startDate: string; endDate: string; recordCount: number }>();
+    const monthNames = [
+      "Januari", "Februari", "Maret", "April", "Mei", "Juni",
+      "Juli", "Agustus", "September", "Oktober", "November", "Desember"
+    ];
+
+    records.forEach(r => {
+      if (!r.tanggal || r.tanggal.length < 7) return;
+      const ym = r.tanggal.substring(0, 7); // e.g. "2026-07"
+      const parts = ym.split("-");
+      if (parts.length !== 2) return;
+      const year = parts[0];
+      const mIdx = parseInt(parts[1], 10) - 1;
+      const mName = (mIdx >= 0 && mIdx < 12) ? monthNames[mIdx] : ym;
+      const label = `${mName} ${year}`;
+
+      if (!monthsMap.has(ym)) {
+        // Calculate last day of month
+        const lastDay = new Date(parseInt(year, 10), mIdx + 1, 0).getDate();
+        const startStr = `${ym}-01`;
+        const endStr = `${ym}-${String(lastDay).padStart(2, "0")}`;
+        monthsMap.set(ym, {
+          label,
+          yearMonth: ym,
+          startDate: startStr,
+          endDate: endStr,
+          recordCount: 1
+        });
+      } else {
+        const item = monthsMap.get(ym)!;
+        item.recordCount += 1;
+      }
+    });
+
+    return Array.from(monthsMap.values()).sort((a, b) => a.yearMonth.localeCompare(b.yearMonth));
+  }, [records]);
+
+  const selectMonth = (ym: string) => {
+    const target = availableMonths.find(m => m.yearMonth === ym);
+    if (target) {
+      setStartDate(target.startDate);
+      setEndDate(target.endDate);
+      setSelectedEgyFilter("SEMUA");
+      setSelectedStorageFilter("SEMUA");
+      saveLocalData("fuel_meta", {
+        startDate: target.startDate,
+        endDate: target.endDate,
+        activeTab: "dashboard"
+      });
+    }
+  };
+
   // Apply filters to get ACTIVE working records for calculation
   const filteredRecords = useMemo(() => {
     return records.filter(r => {
@@ -838,10 +941,11 @@ export default function App() {
     filteredRecords.forEach(r => {
       if (r.isAnomaly || r.selisihHm <= 0) return;
       const key = r.idAlat.toUpperCase();
+      const resolvedEgy = cleanEgyName(deriveEgy(r.idAlat, r.egy || r.typeAlat) || r.egy || "LAINNYA");
       if (!aggregates[key]) {
         aggregates[key] = {
           idAlat: r.idAlat,
-          egy: r.egy || deriveEgy(r.idAlat, r.typeAlat),
+          egy: resolvedEgy,
           typeAlat: r.typeAlat,
           totalVolume: 0,
           totalHours: 0,
@@ -1057,7 +1161,8 @@ export default function App() {
             throw new Error("Tidak menemukan baris data pengisian valid. Pastikan format kolom sesuai dengan template Excel.");
           }
           
-          setRecords(parsed);
+          const mergedCsv = mergeWithYearlyRecords(parsed);
+          setRecords(mergedCsv);
           setSelectedEgyFilter("SEMUA");
           setSelectedStorageFilter("SEMUA");
           setFileFeedback({
@@ -1072,7 +1177,7 @@ export default function App() {
             setStartDate(sorted[0]);
             setEndDate(sorted[sorted.length - 1]);
 
-            saveLocalData("fuel_records", parsed);
+            saveLocalData("fuel_records", mergedCsv);
             saveLocalData("fuel_plans", plans);
             saveLocalData("fuel_meta", {
               startDate: sorted[0],
@@ -1451,7 +1556,8 @@ export default function App() {
         if (Object.keys(plansExtracted).length > 0) {
           setPlans(plansExtracted);
         }
-        setRecords(parsed);
+        const mergedDirect = mergeWithYearlyRecords(parsed);
+        setRecords(mergedDirect);
         setSelectedEgyFilter("SEMUA");
         setSelectedStorageFilter("SEMUA");
         
@@ -1461,7 +1567,7 @@ export default function App() {
           setStartDate(sorted[0]);
           setEndDate(sorted[sorted.length - 1]);
 
-          saveLocalData("fuel_records", parsed);
+          saveLocalData("fuel_records", mergedDirect);
           saveLocalData("fuel_plans", plansExtracted);
           saveLocalData("fuel_meta", {
             startDate: sorted[0],
@@ -1787,7 +1893,7 @@ export default function App() {
             </div>
           </div>
 
-          {/* Quick PDF & Upload Triggers in Header */}
+          {/* Quick PDF Trigger in Header */}
           <div className="flex items-center gap-2 sm:gap-3">
             <button
               onClick={exportToPdf}
@@ -1796,14 +1902,6 @@ export default function App() {
             >
               <Download className="w-4 h-4" />
               <span>{isExportingPdf ? "Mencetak PDF..." : "Ekspor PDF"}</span>
-            </button>
-            <button
-              onClick={triggerFileDialog}
-              disabled={isProcessingFile}
-              className="flex items-center gap-2 text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 px-3 sm:px-4 py-2 rounded-lg font-bold transition active:scale-95 cursor-pointer"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Impor Excel</span>
             </button>
           </div>
         </div>
@@ -1900,6 +1998,18 @@ export default function App() {
             onBackToDashboard={() => setActiveTab("dashboard")} 
             egyPlans={egyPlans} 
             onOpenPlanManager={() => setActiveTab("plan")} 
+            onSyncRecords={(newRecs) => setRecords(newRecs)}
+            onSelectMonthForDashboard={(mName) => {
+              const monthMap: Record<string, string> = {
+                "Januari": "2026-01", "Februari": "2026-02", "Maret": "2026-03",
+                "April": "2026-04", "Mei": "2026-05", "Juni": "2026-06",
+                "Juli": "2026-07", "Agustus": "2026-08", "September": "2026-09",
+                "Oktober": "2026-10", "November": "2026-11", "Desember": "2026-12"
+              };
+              const ym = monthMap[mName] || `2026-${mName}`;
+              selectMonth(ym);
+              setActiveTab("dashboard");
+            }}
           />
         ) : viewingAnomaliesPage ? (
           <AnomalyDetailsView
@@ -2384,24 +2494,53 @@ export default function App() {
         {/* Interactive Filters Panel */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 flex flex-col xl:flex-row gap-5 items-stretch xl:items-center justify-between font-sans">
           
-          {/* Calendar Picker Range */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+          {/* Calendar Picker Range & Month Selector */}
+          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
+            {/* Quick Month Dropdown from Uploaded Data */}
+            {availableMonths.length > 0 && (
+              <div className="flex flex-col">
+                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+                  <Calendar className="w-3 h-3 text-[#4682B4]" />
+                  <span>PILIH BULAN (YEARLY DATA)</span>
+                </label>
+                <select
+                  value={
+                    availableMonths.find(m => m.startDate === startDate && m.endDate === endDate)?.yearMonth ||
+                    availableMonths.find(m => startDate && startDate.startsWith(m.yearMonth))?.yearMonth || ""
+                  }
+                  onChange={(e) => {
+                    if (e.target.value) {
+                      selectMonth(e.target.value);
+                    }
+                  }}
+                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 font-semibold mt-1 focus:border-[#4682B4] focus:outline-none cursor-pointer"
+                >
+                  <option value="">-- Pilih Periode Bulan --</option>
+                  {availableMonths.map(m => (
+                    <option key={m.yearMonth} value={m.yearMonth}>
+                      {m.label} ({m.recordCount} log)
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
             <div className="flex flex-col">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                 <Calendar className="w-3 h-3 text-[#4682B4]" />
-                <span>PERIODE WAKTU</span>
+                <span>RENTANG TANGGAL</span>
               </label>
               <div className="flex items-center gap-2 mt-1">
                 <input
                   type="date"
-                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none"
+                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
                   value={startDate}
                   onChange={(e) => setStartDate(e.target.value)}
                 />
                 <span className="text-slate-400 text-xs font-bold">-</span>
                 <input
                   type="date"
-                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none"
+                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
                   value={endDate}
                   onChange={(e) => setEndDate(e.target.value)}
                 />
@@ -2561,7 +2700,7 @@ export default function App() {
                   <div className="bg-rose-50 border border-rose-100 p-3.5 rounded-xl">
                     <span className="text-[10px] text-rose-500 uppercase tracking-widest font-extrabold block">Unit Terboros (Max Deviation)</span>
                     <span className="text-lg font-black text-rose-700 mt-1 block">
-                      {overPlanUnits[0].idAlat} <span className="text-xs font-normal text-rose-500">({overPlanUnits[0].typeAlat})</span>
+                      {overPlanUnits[0].idAlat} <span className="text-xs font-bold text-rose-600">({cleanEgyName(overPlanUnits[0].egy || deriveEgy(overPlanUnits[0].idAlat, overPlanUnits[0].typeAlat))})</span>
                     </span>
                     <span className="text-xs text-rose-650 mt-1 block">
                       Deviasi: <strong className="font-bold">+{overPlanUnits[0].deviation.toFixed(2)}</strong> L/Jam (<span className="font-extrabold text-slate-800">+{overPlanUnits[0].deviationPct.toFixed(1)}%</span> over plan)
@@ -2595,7 +2734,7 @@ export default function App() {
                     <thead className="bg-slate-50 text-slate-500 font-bold uppercase tracking-wider text-[10px] border-b border-slate-100">
                       <tr>
                         <th className="py-2.5 px-3">Nomor Unit / ID Alat</th>
-                        <th className="py-2.5 px-3">Sektor Type Alat</th>
+                        <th className="py-2.5 px-3">Egy Alat</th>
                         <th className="py-2.5 px-3 text-right">Target Plan</th>
                         <th className="py-2.5 px-3 text-right">Konsumsi Aktual</th>
                         <th className="py-2.5 px-3 text-right">Deviasi (L/Jam)</th>
@@ -2607,7 +2746,11 @@ export default function App() {
                       {overPlanUnits.map((u, i) => (
                         <tr key={i} className="hover:bg-rose-50/20 transition-all">
                           <td className="py-3 px-3 font-bold text-slate-800 font-sans">{u.idAlat}</td>
-                          <td className="py-3 px-3 text-slate-500">{u.typeAlat}</td>
+                          <td className="py-3 px-3 font-semibold text-slate-700">
+                            <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] font-bold border border-slate-200">
+                              {cleanEgyName(u.egy || deriveEgy(u.idAlat, u.typeAlat))}
+                            </span>
+                          </td>
                           <td className="py-3 px-3 text-right text-slate-500 font-semibold font-mono">{u.plan.toFixed(1)} L/Jam</td>
                           <td className="py-3 px-3 text-right text-rose-700 font-bold font-mono">{u.actual.toFixed(2)} L/Jam</td>
                           <td className="py-3 px-3 text-right text-rose-600 font-black font-mono">+{u.deviation.toFixed(2)}</td>

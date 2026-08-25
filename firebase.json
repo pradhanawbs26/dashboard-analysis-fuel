@@ -1,0 +1,17 @@
+{
+  "hosting": {
+    "public": "public",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "**/node_modules/**"
+    ],
+    "redirects": [
+      {
+        "source": "/",
+        "destination": "https://wbs-dashboard-fuel-analysis-965158607895.asia-southeast1.run.app/",
+        "type": 301
+      }
+    ]
+  }
+}

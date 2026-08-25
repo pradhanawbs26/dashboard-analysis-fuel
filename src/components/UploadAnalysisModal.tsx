@@ -161,7 +161,13 @@ export default function UploadAnalysisModal({
                     </div>
                   </div>
                   <span className="text-[11px] text-slate-500 font-medium">
-                    (Terdeteksi otomatis dari isi data: <strong>{analysisData.detectedMonth}</strong>)
+                    {analysisData.multiMonthMap && Object.keys(analysisData.multiMonthMap).length > 1 ? (
+                      <span className="text-blue-700 font-bold bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                        {Object.keys(analysisData.multiMonthMap).length} Bulan: {Object.keys(analysisData.multiMonthMap).join(", ")}
+                      </span>
+                    ) : (
+                      <>(Terdeteksi otomatis dari isi data: <strong>{analysisData.detectedMonth}</strong>)</>
+                    )}
                   </span>
                 </div>
               </div>
@@ -434,7 +440,11 @@ export default function UploadAnalysisModal({
         {/* MODAL FOOTER */}
         <div className="bg-white border-t border-slate-200 p-4 sm:p-5 flex flex-col sm:flex-row items-center justify-between gap-3">
           <div className="text-xs text-slate-500 font-medium">
-            Menerapkan data ini akan memperbarui tinjauan tahunan untuk <strong>Bulan {selectedMonth}</strong> dan menyimpannya ke Cloud Firestore.
+            {analysisData.multiMonthMap && Object.keys(analysisData.multiMonthMap).length > 1 ? (
+              <>Menerapkan data ini akan memperbarui dan menyinkronkan <strong>{Object.keys(analysisData.multiMonthMap).length} Bulan ({Object.keys(analysisData.multiMonthMap).join(", ")})</strong> langsung ke Monthly Review dan Cloud Firestore.</>
+            ) : (
+              <>Menerapkan data ini akan memperbarui tinjauan tahunan untuk <strong>Bulan {selectedMonth}</strong> dan menyimpannya ke Cloud Firestore.</>
+            )}
           </div>
 
           <div className="flex items-center gap-3 w-full sm:w-auto justify-end">
