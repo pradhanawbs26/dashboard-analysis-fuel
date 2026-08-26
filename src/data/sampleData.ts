@@ -1,57 +1,114 @@
 import { FuelRecord } from "../types";
 
+// Robust month name dictionary covering Indonesian and English variants
+const MONTH_NAMES_DICT: Record<string, string> = {
+  jan: "01", januari: "01", january: "01",
+  feb: "02", februari: "02", february: "02",
+  mar: "03", maret: "03", march: "03",
+  apr: "04", april: "04",
+  mei: "05", may: "05",
+  jun: "06", juni: "06", june: "06",
+  jul: "07", juli: "07", july: "07",
+  ags: "08", agu: "08", agt: "08", agustus: "08", aug: "08", august: "08",
+  sep: "09", sept: "09", september: "09",
+  okt: "10", oktober: "10", oct: "10", october: "10",
+  nov: "11", nop: "11", nopember: "11", november: "11",
+  des: "12", desember: "12", dec: "12", december: "12"
+};
+
 // Helper to reliably convert any Excel/CSV date format into correct YYYY-MM-DD string
 export function normalizeDateToYMD(cellVal: any): string {
   if (cellVal === undefined || cellVal === null) return "";
   
-  if (typeof cellVal === "number") {
-    try {
-      // Excel serial date starting from 1900-01-01
-      const dateObj = new Date((cellVal - 25569) * 86400 * 1000);
-      if (!isNaN(dateObj.getTime())) {
-        return dateObj.toISOString().split("T")[0];
-      }
-    } catch (_) {}
-  }
-  
+  // 1. JavaScript Date object
   if (cellVal instanceof Date) {
     try {
       if (!isNaN(cellVal.getTime())) {
-        return cellVal.toISOString().split("T")[0];
+        const year = cellVal.getFullYear();
+        const month = String(cellVal.getMonth() + 1).padStart(2, "0");
+        const day = String(cellVal.getDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
       }
     } catch (_) {}
   }
 
-  // Handle strings
+  // 2. Excel numeric serial date (e.g. 46255 for 2026-08-21)
+  if (typeof cellVal === "number" && !isNaN(cellVal) && cellVal > 0) {
+    try {
+      const wholeDays = Math.floor(cellVal);
+      // Excel epoch: 25569 days between 1899-12-30 and 1970-01-01
+      const dateObj = new Date(Math.round((wholeDays - 25569) * 86400 * 1000));
+      if (!isNaN(dateObj.getTime())) {
+        const year = dateObj.getUTCFullYear();
+        const month = String(dateObj.getUTCMonth() + 1).padStart(2, "0");
+        const day = String(dateObj.getUTCDate()).padStart(2, "0");
+        return `${year}-${month}-${day}`;
+      }
+    } catch (_) {}
+  }
+
+  // 3. String values
   let str = String(cellVal).trim();
   if (!str) return "";
 
-  // Split off any time part e.g., "2026-05-27 12:00:00" -> "2026-05-27"
-  let datePart = str.split(/[ T]/)[0];
+  // Check if string is already YYYY-MM-DD format
+  const isoMatch = str.match(/^(\d{4})[-/.](\d{1,2})[-/.](\d{1,2})/);
+  if (isoMatch) {
+    const y = isoMatch[1];
+    const m = isoMatch[2].padStart(2, "0");
+    const d = isoMatch[3].padStart(2, "0");
+    return `${y}-${m}-${d}`;
+  }
 
-  // Standardise separators to '/'
-  const workingStr = datePart.replace(/[-.]/g, "/");
-  const parts = workingStr.split("/");
+  // Strip time part (e.g., "21/08/2026 14:30:00" -> "21/08/2026")
+  let datePart = str.split(/[ T]/)[0].trim();
+  if (!datePart) datePart = str;
 
-  if (parts.length === 3) {
-    const p0 = parts[0].trim();
-    const p1 = parts[1].trim();
-    const p2 = parts[2].trim();
+  // Tokenize by standard date separators
+  const tokens = datePart.split(/[\s\-\/\.,]+/).filter(Boolean);
 
-    // Case 1: YYYY/MM/DD
-    if (p0.length === 4) {
-      return `${p0}-${p1.padStart(2, "0")}-${p2.padStart(2, "0")}`;
+  if (tokens.length >= 3) {
+    const t0 = tokens[0].trim();
+    const t1 = tokens[1].trim();
+    const t2 = tokens[2].trim();
+
+    // Check if middle token is a month name (e.g. "21", "Agustus", "2026" or "21", "Agu", "26")
+    const t1Lower = t1.toLowerCase();
+    if (MONTH_NAMES_DICT[t1Lower]) {
+      const month = MONTH_NAMES_DICT[t1Lower];
+      const day = t0.padStart(2, "0");
+      let year = t2;
+      if (year.length === 2) {
+        year = (parseInt(year, 10) > 50 ? "19" : "20") + year;
+      }
+      return `${year}-${month}-${day}`;
     }
-    
-    // Case 2: DD/MM/YYYY
-    if (p2.length === 4) {
-      return `${p2}-${p1.padStart(2, "0")}-${p0.padStart(2, "0")}`;
+
+    // Check if first token is a month name (e.g. "Agustus", "21", "2026")
+    const t0Lower = t0.toLowerCase();
+    if (MONTH_NAMES_DICT[t0Lower]) {
+      const month = MONTH_NAMES_DICT[t0Lower];
+      const day = t1.padStart(2, "0");
+      let year = t2;
+      if (year.length === 2) {
+        year = (parseInt(year, 10) > 50 ? "19" : "20") + year;
+      }
+      return `${year}-${month}-${day}`;
     }
 
-    // Case 3: DD/MM/YY
-    if (p2.length === 2) {
-      const yearPrefix = parseInt(p2) > 50 ? "19" : "20";
-      return `${yearPrefix}${p2}-${p1.padStart(2, "0")}-${p0.padStart(2, "0")}`;
+    // Pure numeric components
+    if (!isNaN(Number(t0)) && !isNaN(Number(t1)) && !isNaN(Number(t2))) {
+      // Case 1: YYYY / MM / DD
+      if (t0.length === 4) {
+        return `${t0}-${t1.padStart(2, "0")}-${t2.padStart(2, "0")}`;
+      }
+
+      // Case 2: DD / MM / YYYY or DD / MM / YY (Indonesian mining fuel log standard)
+      let year = t2;
+      if (year.length === 2) {
+        year = (parseInt(year, 10) > 50 ? "19" : "20") + year;
+      }
+      return `${year}-${t1.padStart(2, "0")}-${t0.padStart(2, "0")}`;
     }
   }
 
@@ -663,27 +720,35 @@ export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate'
   let isAnomaly = false;
   let anomalyMessage = "";
 
-  const cleanId = (raw.idAlat || "").toUpperCase();
+  const cleanId = (raw.idAlat || "").toUpperCase().replace(/[\s\-_]/g, "");
   if (raw.hmSebelum < 0 || raw.hmSaatIni < 0) {
     isAnomaly = true;
     anomalyMessage = "Nilai HM tidak boleh negatif";
-  } else if (cleanId === "FD23252" || selisihHm === 0 || isNaN(selisihHm) || (raw.hmSebelum === 0 && raw.hmSaatIni > 100) || selisihHm > 744) {
+  } else if (cleanId === "FD23252" || isNaN(selisihHm) || (raw.hmSebelum === 0 && raw.hmSaatIni > 100) || selisihHm > 744) {
     isAnomaly = true;
     anomalyMessage = "Unit Rental (HM Running Kosong / Dump Odometer Fisik)";
   } else if (selisihHm < 0) {
     isAnomaly = true;
-    anomalyMessage = `HM Mundur (${selisihHm} Jam - Indikasi Reset/Kerusakan)`;
+    anomalyMessage = `HM Mundur (${selisihHm} Jam - Indikasi Reset/Kerusakan HM)`;
+  } else if (selisihHm === 0) {
+    isAnomaly = true;
+    anomalyMessage = "HM Tidak Bergerak (0 Jam Operasi / Unit Standby)";
+  } else if (raw.volumeFuel <= 0) {
+    isAnomaly = true;
+    anomalyMessage = `Volume Solar Nol / Kosong (${raw.volumeFuel} L)`;
   } else {
     fuelBurnRate = Number((raw.volumeFuel / selisihHm).toFixed(2));
     
-    // Additional logic warning: typical heavy machinery burn rates
-    // Flagging if fuel burn rate exceeds realistic thresholds for safety audit
-    if (fuelBurnRate > 120) {
+    // Flagging realistic operational limits:
+    // 1. Extreme abnormal burn rate (> 150 L/Jam is physically unfeasible for standard shift equipment)
+    if (fuelBurnRate > 150) {
       isAnomaly = true;
-      anomalyMessage = `Fuel Burn Sangat Tinggi (${fuelBurnRate} L/Jam - Indikasi Kebocoran/Salah input)`;
-    } else if (fuelBurnRate < 3) {
+      anomalyMessage = `Fuel Burn Sangat Tinggi (${fuelBurnRate} L/Jam - Indikasi Salah Input HM/Volume)`;
+    } else if (fuelBurnRate < 0.5) {
+      // Small units, light vehicles, idling trucks legitimately have burn rates 1.5 - 4.5 L/hr
+      // Only flag near-zero burn rate (< 0.5 L/jam) as an anomaly
       isAnomaly = true;
-      anomalyMessage = `Fuel Burn Sangat Rendah (${fuelBurnRate} L/Jam - Indikasi Manipulasi HM)`;
+      anomalyMessage = `Fuel Burn Sangat Rendah (${fuelBurnRate} L/Jam - Indikasi Manipulasi HM/Volume)`;
     }
   }
 

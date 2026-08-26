@@ -1037,8 +1037,10 @@ export default function App() {
       const totalHours = valids.reduce((acc, r) => acc + r.selisihHm, 0);
       const fuelBurnSum = valids.reduce((acc, r) => acc + r.fuelBurnRate, 0);
       
-      // We calculate standard arithmetic average of the records' burn rates
-      const averageRate = valids.length > 0 ? Number((fuelBurnSum / valids.length).toFixed(2)) : 0;
+      // Calculate true weighted operational fleet fuel burn rate (Total Liter / Total Jam Kerja)
+      const averageRate = totalHours > 0 
+        ? Number((totalFuel / totalHours).toFixed(2)) 
+        : (valids.length > 0 ? Number((fuelBurnSum / valids.length).toFixed(2)) : 0);
 
       return {
         average: averageRate,

@@ -1181,28 +1181,31 @@ export default function YearlyReview({
                 isAnomalyRow = true;
               }
 
-              // Attempt to scrape month from date cell
-              let rowMonthName = selectedMonthForUpload || monthIdentifier;
+              // Scrape exact date from date cell
               let normalizedYmd = "";
-              if (!selectedMonthForUpload && colMap.tanggal !== -1 && row[colMap.tanggal]) {
+              if (colMap.tanggal !== -1 && colMap.tanggal < row.length && row[colMap.tanggal] !== undefined && row[colMap.tanggal] !== null) {
                 normalizedYmd = normalizeDateToYMD(row[colMap.tanggal]);
-                if (normalizedYmd) {
-                  const parts = normalizedYmd.split("-");
-                  if (parts.length === 3) {
-                    const mIdx = parseInt(parts[1], 10) - 1;
-                    if (mIdx >= 0 && mIdx < 12) {
+              }
+
+              let rowMonthName = selectedMonthForUpload || monthIdentifier;
+              if (normalizedYmd) {
+                const parts = normalizedYmd.split("-");
+                if (parts.length === 3) {
+                  const mIdx = parseInt(parts[1], 10) - 1;
+                  if (mIdx >= 0 && mIdx < 12) {
+                    if (!selectedMonthForUpload) {
                       rowMonthName = MONTH_NAMES_IND[mIdx];
                     }
                   }
                 }
               }
 
-              // Synthesize full transaction record for raw log preservation
+              // Full transaction record date preservation: prioritize exact date extracted from Excel row!
               const fallbackTanggal = normalizedYmd || (rowMonthName ? (() => {
                 const mIdx = getMonthFromText(rowMonthName);
-                const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "01";
+                const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "08";
                 return `2026-${mPad}-15`;
-              })() : "2026-01-01");
+              })() : "2026-08-15");
 
               const rowStorage = colMap.storage !== -1 && colMap.storage < row.length && row[colMap.storage] ? String(row[colMap.storage]).trim() : "Storage Utama Central";
               const rowOperator = colMap.operator !== -1 && colMap.operator < row.length && row[colMap.operator] ? String(row[colMap.operator]).trim() : "Operator Lapangan";
@@ -1386,6 +1389,8 @@ export default function YearlyReview({
           });
         }
 
+        const anomalyRecCount = parsedRawFuelRecords.filter(r => r.isAnomaly).length;
+
         const stagingResult: AnalyzedUploadResult = {
           fileName: file.name,
           fileSize: file.size,
@@ -1393,9 +1398,9 @@ export default function YearlyReview({
           sheetNames: workbook.SheetNames,
           detectedMonth: dominantMonth,
           detectedYear: 2026,
-          totalRecords: totalValidRecCount,
+          totalRecords: parsedRawFuelRecords.length,
           validRecords: totalValidRecCount,
-          anomalyRecords: 0,
+          anomalyRecords: anomalyRecCount,
           totalVolume: Number(totalValidVol.toFixed(1)),
           totalHours: Number(totalValidHrs.toFixed(1)),
           avgBurnRate: overallBurn,
