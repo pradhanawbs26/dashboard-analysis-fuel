@@ -332,6 +332,7 @@ export default function YearlyReview({
   });
 
   const [activeAnalysisMetric, setActiveAnalysisMetric] = useState<"burnRate" | "volume" | "hours">("burnRate");
+  const [activeTableMetric, setActiveTableMetric] = useState<"burnRate" | "volume" | "hours">("burnRate");
   const [showChartLabels, setShowChartLabels] = useState<boolean>(true);
   const [selectedHighlightType, setSelectedHighlightType] = useState<string>("SEMUA");
   const [startEvalMonth, setStartEvalMonth] = useState<string>("Januari");
@@ -2467,12 +2468,49 @@ export default function YearlyReview({
                 <h3 className="text-sm font-extrabold text-slate-800">Tabel Fuel Burn</h3>
               </div>
               <p className="text-[11px] text-slate-500 font-medium">
-                Klik baris alat berat untuk melihat rincian nomor unit individual beserta data fuel burn bulan per bulan
+                Klik baris alat berat untuk melihat rincian nomor unit individual beserta data {activeTableMetric === "burnRate" ? "fuel burn (L/Jam)" : activeTableMetric === "volume" ? "volume solar (Liter)" : "jam kerja mesin (HM)"} bulan per bulan
               </p>
             </div>
 
-            {/* Table Action & Sorting Controls */}
+            {/* Table Action, Metric Switches & Sorting Controls */}
             <div className="flex flex-wrap items-center gap-2">
+              {/* Metric switches for Table (L/Jam, Volume (L), HM (Jam)) */}
+              <div className="flex bg-slate-100 p-1.5 rounded-lg border border-slate-200/50 self-start sm:self-center">
+                <button
+                  type="button"
+                  onClick={() => setActiveTableMetric("burnRate")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeTableMetric === "burnRate"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  L/Jam
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTableMetric("volume")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeTableMetric === "volume"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Volume (L)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setActiveTableMetric("hours")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeTableMetric === "hours"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  HM (Jam)
+                </button>
+              </div>
+
               <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-250 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700">
                 <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
                 <span className="text-[11px] text-slate-500 font-normal">Urutkan:</span>
@@ -2554,12 +2592,20 @@ export default function YearlyReview({
                   <th 
                     onClick={() => {
                       setActiveMonthSort(null);
-                      setSortOption(prev => prev === "worst_achievement" ? "best_achievement" : "worst_achievement");
+                      if (activeTableMetric === "volume") {
+                        setSortOption(prev => prev === "volume_desc" ? "name_asc" : "volume_desc");
+                      } else if (activeTableMetric === "hours") {
+                        setSortOption(prev => prev === "hours_desc" ? "name_asc" : "hours_desc");
+                      } else {
+                        setSortOption(prev => prev === "worst_achievement" ? "best_achievement" : "worst_achievement");
+                      }
                     }}
-                    className="p-3 text-center font-extrabold bg-slate-100/50 min-w-[80px] cursor-pointer hover:bg-slate-200/60 transition"
+                    className="p-3 text-center font-extrabold bg-slate-100/50 min-w-[85px] cursor-pointer hover:bg-slate-200/60 transition"
                   >
                     <div className="flex items-center justify-center gap-1">
-                      <span>Plan</span>
+                      <span>
+                        {activeTableMetric === "burnRate" ? "Plan" : activeTableMetric === "volume" ? "Total (L)" : "Total (HM)"}
+                      </span>
                       <ArrowUpDown className="w-3 h-3 text-slate-400" />
                     </div>
                   </th>
@@ -2571,6 +2617,17 @@ export default function YearlyReview({
                   const planValue = activeEgyPlans[cleanType] || activeEgyPlans[type] || DEFAULT_TYPE_PLANS[cleanType] || DEFAULT_TYPE_PLANS[type] || 0;
                   const isExpanded = expandedEgys.has(type);
                   const unitsInThisEgy = unitsByEgy[cleanType] || unitsByEgy[type.toUpperCase()] || [];
+
+                  // Calculate parent totals across currentMonths
+                  let parentTotalVol = 0;
+                  let parentTotalHrs = 0;
+                  currentMonths.forEach(m => {
+                    const c = pivotTableData[type]?.[m];
+                    if (c) {
+                      parentTotalVol += c.vol;
+                      parentTotalHrs += c.hrs;
+                    }
+                  });
 
                   return (
                     <React.Fragment key={type}>
@@ -2613,11 +2670,11 @@ export default function YearlyReview({
                           let isOverPlan = false;
 
                           if (cell && cell.count > 0) {
-                            if (activeAnalysisMetric === "burnRate") {
+                            if (activeTableMetric === "burnRate") {
                               const rate = cell.hrs > 0 ? cell.vol / cell.hrs : 0;
                               content = rate.toFixed(1);
                               isOverPlan = planValue > 0 && rate > (planValue + 0.1);
-                            } else if (activeAnalysisMetric === "volume") {
+                            } else if (activeTableMetric === "volume") {
                               content = Math.round(cell.vol).toLocaleString("id-ID");
                             } else {
                               content = Math.round(cell.hrs).toLocaleString("id-ID");
@@ -2628,11 +2685,15 @@ export default function YearlyReview({
                             <td
                               key={month}
                               className={`p-3 text-center font-mono ${
-                                isOverPlan 
-                                  ? "bg-rose-50 text-rose-600 font-extrabold" 
-                                  : cell && cell.count > 0 && activeAnalysisMetric === "burnRate"
-                                  ? "bg-emerald-50 text-emerald-700 font-semibold"
-                                  : ""
+                                activeTableMetric === "burnRate"
+                                  ? isOverPlan 
+                                    ? "bg-rose-50 text-rose-600 font-extrabold" 
+                                    : cell && cell.count > 0
+                                    ? "bg-emerald-50 text-emerald-700 font-semibold"
+                                    : ""
+                                  : cell && cell.count > 0
+                                  ? "text-slate-800 font-bold"
+                                  : "text-slate-300"
                               }`}
                             >
                               {content}
@@ -2640,9 +2701,15 @@ export default function YearlyReview({
                           );
                         })}
 
-                        {/* Plan Col */}
-                        <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-600">
-                          {planValue > 0 ? planValue : "-"}
+                        {/* Plan / Total Col */}
+                        <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-700">
+                          {activeTableMetric === "burnRate" ? (
+                            planValue > 0 ? planValue : "-"
+                          ) : activeTableMetric === "volume" ? (
+                            parentTotalVol > 0 ? Math.round(parentTotalVol).toLocaleString("id-ID") : "-"
+                          ) : (
+                            parentTotalHrs > 0 ? Math.round(parentTotalHrs).toLocaleString("id-ID") : "-"
+                          )}
                         </td>
                       </tr>
 
@@ -2653,6 +2720,17 @@ export default function YearlyReview({
                             unitsInThisEgy.map((unit, uIdx) => {
                               const unitPlan = unit.unitPlan > 0 ? unit.unitPlan : planValue;
                               const isLastUnit = uIdx === unitsInThisEgy.length - 1;
+
+                              // Calculate unit total across currentMonths
+                              let unitTotalVol = 0;
+                              let unitTotalHrs = 0;
+                              currentMonths.forEach(m => {
+                                const c = unit.monthly[m];
+                                if (c) {
+                                  unitTotalVol += c.vol;
+                                  unitTotalHrs += c.hrs;
+                                }
+                              });
 
                               return (
                                 <tr 
@@ -2684,22 +2762,42 @@ export default function YearlyReview({
                                     </div>
                                   </td>
 
-                                  {/* Unit Monthly Fuel Burn Cells */}
+                                  {/* Unit Monthly Fuel Burn / Volume / Hours Cells */}
                                   {currentMonths.map(month => {
                                     const cell = unit.monthly[month];
                                     let content = "-";
                                     let isUnitOverPlan = false;
                                     let hasData = false;
 
-                                    if (cell && cell.hrs > 0 && cell.burnRate !== null) {
-                                      content = cell.burnRate.toFixed(1);
-                                      hasData = true;
-                                      isUnitOverPlan = unitPlan > 0 && cell.burnRate > (unitPlan + 0.1);
+                                    if (cell && cell.count > 0) {
+                                      if (activeTableMetric === "burnRate") {
+                                        if (cell.hrs > 0 && cell.burnRate !== null) {
+                                          content = cell.burnRate.toFixed(1);
+                                          hasData = true;
+                                          isUnitOverPlan = unitPlan > 0 && cell.burnRate > (unitPlan + 0.1);
+                                        }
+                                      } else if (activeTableMetric === "volume") {
+                                        if (cell.vol > 0) {
+                                          content = Math.round(cell.vol).toLocaleString("id-ID");
+                                          hasData = true;
+                                        }
+                                      } else {
+                                        if (cell.hrs > 0) {
+                                          content = Math.round(cell.hrs).toLocaleString("id-ID");
+                                          hasData = true;
+                                        }
+                                      }
                                     }
 
                                     const isJanApr = ["Januari", "Februari", "Maret", "April"].includes(month);
                                     const cellTooltip = hasData
-                                      ? `${unit.idAlat} | ${month}: ${content} L/Jam (${Math.round(cell.vol).toLocaleString("id-ID")} L / ${Math.round(cell.hrs).toLocaleString("id-ID")} Jam)${
+                                      ? `${unit.idAlat} | ${month}: ${
+                                          activeTableMetric === "burnRate"
+                                            ? `${content} L/Jam`
+                                            : activeTableMetric === "volume"
+                                            ? `${content} Liter`
+                                            : `${content} Jam`
+                                        } (${Math.round(cell?.vol || 0).toLocaleString("id-ID")} L / ${Math.round(cell?.hrs || 0).toLocaleString("id-ID")} Jam)${
                                           unit.hasRenamedPattern && isJanApr ? ` [Unit terdata: ${unit.legacyId}]` : ""
                                         }`
                                       : `Tidak ada data operasi ${unit.idAlat} pada bulan ${month}`;
@@ -2709,10 +2807,14 @@ export default function YearlyReview({
                                         key={month}
                                         title={cellTooltip}
                                         className={`py-2 px-3 text-center font-mono text-[11px] ${
-                                          hasData
-                                            ? isUnitOverPlan
-                                              ? "bg-rose-50/90 text-rose-600 font-bold"
-                                              : "bg-emerald-50/90 text-emerald-700 font-semibold"
+                                          activeTableMetric === "burnRate"
+                                            ? hasData
+                                              ? isUnitOverPlan
+                                                ? "bg-rose-50/90 text-rose-600 font-bold"
+                                                : "bg-emerald-50/90 text-emerald-700 font-semibold"
+                                              : "text-slate-300"
+                                            : hasData
+                                            ? "text-slate-800 font-medium"
                                             : "text-slate-300"
                                         }`}
                                       >
@@ -2721,9 +2823,15 @@ export default function YearlyReview({
                                     );
                                   })}
 
-                                  {/* Unit Plan Column */}
-                                  <td className="py-2 px-3 text-center font-mono text-[11px] font-bold bg-slate-100/40 text-slate-500">
-                                    {unitPlan > 0 ? unitPlan : "-"}
+                                  {/* Unit Plan / Total Column */}
+                                  <td className="py-2 px-3 text-center font-mono text-[11px] font-bold bg-slate-100/40 text-slate-600">
+                                    {activeTableMetric === "burnRate" ? (
+                                      unitPlan > 0 ? unitPlan : "-"
+                                    ) : activeTableMetric === "volume" ? (
+                                      unitTotalVol > 0 ? Math.round(unitTotalVol).toLocaleString("id-ID") : "-"
+                                    ) : (
+                                      unitTotalHrs > 0 ? Math.round(unitTotalHrs).toLocaleString("id-ID") : "-"
+                                    )}
                                   </td>
                                 </tr>
                               );
