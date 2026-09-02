@@ -293,6 +293,35 @@ export function cleanEgyName(name: string): string {
   return clean;
 }
 
+/**
+ * Standard Unit ID normalizer:
+ * Converts older/historical fleet numbers (e.g. RS15001, FD15001, FL15001, DT15001, 15001)
+ * to modern canonical equipment numbers (e.g. RS23001, FD23001, FL23001, DT23001, 23001).
+ */
+export function getCanonicalUnitId(idAlat?: string): string {
+  if (!idAlat) return "";
+  const clean = idAlat.trim();
+  // Transform 15xxx into 23xxx (e.g. RS15001 -> RS23001, FD15004 -> FD23004, 15001 -> 23001)
+  return clean.replace(/^([A-Za-z]*[-_\s]*)15(\d+)$/i, "$123$2");
+}
+
+/**
+ * Historical Unit ID resolver:
+ * Converts current 23-series fleet numbers back to their Jan-Apr historical 15-series name
+ * (e.g. RS23001 -> RS15001, FD23001 -> FD15001, 23001 -> 15001).
+ */
+export function getHistoricalLegacyUnitId(idAlat?: string): string {
+  if (!idAlat) return "";
+  const clean = idAlat.trim();
+  return clean.replace(/^([A-Za-z]*[-_\s]*)23(\d+)$/i, "$115$2");
+}
+
+export function isHistoricalRenamedUnit(idAlat?: string): boolean {
+  if (!idAlat) return false;
+  const clean = idAlat.trim().toUpperCase();
+  return /^[A-Z]*[-_\s]*(15|23)\d+$/.test(clean);
+}
+
 export interface JulyEquipmentMaster {
   egy: string;
   type: string;
@@ -302,19 +331,25 @@ export interface JulyEquipmentMaster {
 export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   // Bulldozers
   "DZ23001": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
+  "DZ15001": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
   "DZ-01": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
 
   // Wheel Loaders
   "WL23001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
+  "WL15001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
   "WL23002": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
   "WL23003": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
   "WL23004": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
+  "WL15004": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
   "WA-500-01": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
 
   // Reach Stackers
   "RS23001": { egy: "REACH STACKER", type: "KONECRANE 45T" },
+  "RS15001": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS23002": { egy: "REACH STACKER", type: "KONECRANE 45T" },
+  "RS15002": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS23003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
+  "RS15003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "KC-45T-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
 
@@ -359,10 +394,12 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
 
   // Dump Trucks
   "DT23001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
+  "DT15001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23002": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23003": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23004": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
+  "DT15005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23006": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23007": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23008": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
@@ -372,16 +409,19 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
 
   // Excavators
   "EX23001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
+  "EX15001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
   "EX23203": { egy: "EXCAVATOR", type: "CAT 320 GC" },
   "EX-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
   "EX-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
 
   // Fuel Truck
   "FT23001": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
+  "FT15001": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
   "FT-01": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
 
   // Water Trucks
   "WT23001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
+  "WT15001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23002": { egy: "WATER TRUCK", type: "HINO 500 (FM280JD)" },
   "WT23003": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23004": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
@@ -391,6 +431,7 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "WT23008": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23009": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
+  "WT15102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WT-01": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WT-02": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
@@ -406,27 +447,33 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
 
   // Motor Grader
   "GD23001": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
+  "GD15001": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-02": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
 
   // Crane Truck
   "CT23001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
+  "CT15001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
   "CT-01": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
 
   // Tower Lamp
   "TL23002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
+  "TL15002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
   "TL-01": { egy: "TOWER LAMP", type: "TOWER LAMP" },
 
   // Light Vehicles
   "LV23207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
+  "LV15207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
   "LV-01": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
 
   // Compactor
   "CP23001": { egy: "COMPACTOR", type: "BOMAG BW211 / CATERPILAR CS 11 GC" },
+  "CP15001": { egy: "COMPACTOR", type: "BOMAG BW211 / CATERPILAR CS 11 GC" },
 
   // Gensets
   "GS23001": { egy: "GENSET", type: "GENSET CUMMINS 250KVA" },
+  "GS15001": { egy: "GENSET", type: "GENSET CUMMINS 250KVA" },
   "GS-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
   "GENSET-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
 };
@@ -1159,6 +1206,10 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
   const generatedRecords: typeof RAW_SAMPLE_DATA = [];
 
   baseMonths.forEach((m, mIndex) => {
+    // Determine whether this month uses historical (15001) or current (23001) equipment numbering
+    // Months Jan - Apr (mIndex 0 to 3) used 15-series, May onwards (mIndex >= 4) uses 23-series
+    const isHistoricalMonth = mIndex < 4;
+
     // Generate dates throughout the month (e.g. 5th, 10th, 15th, 20th, 25th, 28th)
     const days = ["04", "08", "12", "16", "20", "24", "28"];
     days.forEach((day, dIdx) => {
@@ -1170,11 +1221,13 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
         const volVariance = ((fIdx + dIdx + mIndex) % 5) - 2;
         const finalVol = Math.max(10, fleet.vol + volVariance * 2);
 
+        const currentUnitId = isHistoricalMonth ? getHistoricalLegacyUnitId(fleet.idAlat) : fleet.idAlat;
+
         generatedRecords.push({
-          id: `rec-${m.ym}-${day}-${fleet.idAlat}`,
+          id: `rec-${m.ym}-${day}-${currentUnitId}`,
           tanggal: `${m.ym}-${day}`,
           storage: fleet.stor,
-          idAlat: fleet.idAlat,
+          idAlat: currentUnitId,
           typeAlat: fleet.typeAlat,
           hmSebelum: hmStart,
           hmSaatIni: hmEnd,

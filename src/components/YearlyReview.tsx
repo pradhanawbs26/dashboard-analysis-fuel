@@ -10,7 +10,11 @@ import {
   Calendar, 
   Info, 
   Sparkles, 
-  ChevronDown, 
+  ChevronDown,
+  ChevronRight,
+  ArrowUpDown,
+  CornerDownRight,
+  Layers,
   Table, 
   FileText,
   Activity,
@@ -19,7 +23,9 @@ import {
   Cloud,
   Database,
   RefreshCw,
-  SlidersHorizontal
+  SlidersHorizontal,
+  Tag,
+  Hash
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { jsPDF } from "jspdf";
@@ -32,7 +38,11 @@ import {
   getJulyBenchmarkRegistry,
   MASTER_JULY_BENCHMARKS,
   MONTH_NAMES_IND,
-  KNOWN_CANONICAL_EGY
+  KNOWN_CANONICAL_EGY,
+  INITIAL_FUEL_DATA,
+  getCanonicalUnitId,
+  getHistoricalLegacyUnitId,
+  isHistoricalRenamedUnit
 } from "../data/sampleData";
 import UploadAnalysisModal, { 
   AnalyzedUploadResult, 
@@ -56,6 +66,8 @@ import { getStoredEgyPlans, saveStoredEgyPlans, subscribeToEgyPlans, DEFAULT_EGY
 interface YearlyReviewProps {
   onBackToDashboard?: () => void;
   egyPlans?: EgyPlanMap;
+  unitPlans?: Record<string, { idAlat: string; typeAlat?: string; egy?: string; planFuelBurn?: number }>;
+  records?: FuelRecord[];
   onOpenPlanManager?: () => void;
   onSyncRecords?: (newRecords: FuelRecord[]) => void;
   onSelectMonthForDashboard?: (monthName: string) => void;
@@ -223,6 +235,8 @@ const SAMPLE_YEARLY_DATA = [
 export default function YearlyReview({ 
   onBackToDashboard, 
   egyPlans: propEgyPlans, 
+  unitPlans: propUnitPlans,
+  records: propRecords,
   onOpenPlanManager,
   onSyncRecords,
   onSelectMonthForDashboard
@@ -230,6 +244,34 @@ export default function YearlyReview({
   // Local fallback / synced egyPlans
   const [internalEgyPlans, setInternalEgyPlans] = useState<EgyPlanMap>(() => getStoredEgyPlans());
   const [isInternalPlanModalOpen, setIsInternalPlanModalOpen] = useState(false);
+
+  // Expandable EGY rows state (stores set of expanded EGY names)
+  const [expandedEgys, setExpandedEgys] = useState<Set<string>>(new Set());
+
+  // Sorting state: defaults to "worst_achievement" (EGYs with highest over-plan first)
+  type SortOption = "worst_achievement" | "best_achievement" | "name_asc" | "name_desc" | "volume_desc" | "hours_desc";
+  const [sortOption, setSortOption] = useState<SortOption>("worst_achievement");
+  const [activeMonthSort, setActiveMonthSort] = useState<{ month: string; direction: "desc" | "asc" } | null>(null);
+
+  const toggleExpandEgy = (egyName: string) => {
+    setExpandedEgys(prev => {
+      const next = new Set(prev);
+      if (next.has(egyName)) {
+        next.delete(egyName);
+      } else {
+        next.add(egyName);
+      }
+      return next;
+    });
+  };
+
+  const expandAllEgys = () => {
+    setExpandedEgys(new Set(uniqueEquipmentTypes));
+  };
+
+  const collapseAllEgys = () => {
+    setExpandedEgys(new Set());
+  };
 
   useEffect(() => {
     const unsub = subscribeToEgyPlans((latest) => {
@@ -290,6 +332,7 @@ export default function YearlyReview({
   });
 
   const [activeAnalysisMetric, setActiveAnalysisMetric] = useState<"burnRate" | "volume" | "hours">("burnRate");
+  const [showChartLabels, setShowChartLabels] = useState<boolean>(true);
   const [selectedHighlightType, setSelectedHighlightType] = useState<string>("SEMUA");
   const [startEvalMonth, setStartEvalMonth] = useState<string>("Januari");
   const [endEvalMonth, setEndEvalMonth] = useState<string>("Desember");
@@ -1653,6 +1696,220 @@ export default function YearlyReview({
     return map;
   }, [uniqueEquipmentTypes, currentMonths, dataPoints]);
 
+  // Unit Level Aggregator for drilldown month-by-month
+  interface UnitMonthlyAgg {
+    idAlat: string;
+    legacyId: string;
+    hasRenamedPattern: boolean;
+    egy: string;
+    typeAlat: string;
+    monthly: Record<string, { vol: number; hrs: number; count: number; burnRate: number | null }>;
+    totalVol: number;
+    totalHrs: number;
+    overallBurnRate: number;
+    unitPlan: number;
+  }
+
+  const unitMonthlyMap = useMemo(() => {
+    const map: Record<string, UnitMonthlyAgg> = {};
+
+    // 1. Gather all raw/historical fuel records from props, storage, or initial template
+    const allRecords = (propRecords && propRecords.length > 0)
+      ? propRecords 
+      : getSyncLocalData<FuelRecord[]>("fuel_records", INITIAL_FUEL_DATA);
+
+    allRecords.forEach(r => {
+      if (!r.idAlat) return;
+      const rawId = r.idAlat.trim().toUpperCase();
+      // Resolve to canonical 23xxx unit id (e.g. RS15001 -> RS23001, FD15001 -> FD23001)
+      const canonicalId = getCanonicalUnitId(rawId).toUpperCase();
+      const legacyId = getHistoricalLegacyUnitId(canonicalId).toUpperCase();
+      const hasRenamedPattern = canonicalId !== legacyId;
+
+      const canonEgy = cleanEgyName(r.egy || deriveEgy(canonicalId, r.typeAlat)).toUpperCase();
+      const modelType = r.typeAlat || deriveEquipmentType(canonicalId);
+
+      let monthName = "";
+      if (r.tanggal) {
+        const ymd = normalizeDateToYMD(r.tanggal);
+        if (ymd) {
+          const parts = ymd.split("-");
+          if (parts.length === 3) {
+            const mIdx = parseInt(parts[1], 10) - 1;
+            if (mIdx >= 0 && mIdx < 12) {
+              monthName = MONTH_NAMES_IND[mIdx];
+            }
+          }
+        }
+      }
+      if (!monthName) return;
+
+      if (!map[canonicalId]) {
+        const unitSpecificPlan = propUnitPlans?.[canonicalId]?.planFuelBurn 
+          || propUnitPlans?.[rawId]?.planFuelBurn
+          || activeEgyPlans[canonEgy] 
+          || DEFAULT_TYPE_PLANS[canonEgy] 
+          || DEFAULT_TYPE_PLANS[modelType] 
+          || 0;
+
+        map[canonicalId] = {
+          idAlat: canonicalId,
+          legacyId: legacyId,
+          hasRenamedPattern: hasRenamedPattern,
+          egy: canonEgy,
+          typeAlat: modelType,
+          monthly: {},
+          totalVol: 0,
+          totalHrs: 0,
+          overallBurnRate: 0,
+          unitPlan: unitSpecificPlan
+        };
+      }
+
+      if (!map[canonicalId].monthly[monthName]) {
+        map[canonicalId].monthly[monthName] = { vol: 0, hrs: 0, count: 0, burnRate: null };
+      }
+
+      if (!r.isAnomaly && r.selisihHm > 0 && r.volumeFuel > 0) {
+        map[canonicalId].monthly[monthName].vol += r.volumeFuel;
+        map[canonicalId].monthly[monthName].hrs += r.selisihHm;
+        map[canonicalId].monthly[monthName].count += 1;
+        map[canonicalId].totalVol += r.volumeFuel;
+        map[canonicalId].totalHrs += r.selisihHm;
+      }
+    });
+
+    // Calculate rates for each unit
+    Object.values(map).forEach(u => {
+      Object.keys(u.monthly).forEach(m => {
+        const mEntry = u.monthly[m];
+        if (mEntry.hrs > 0) {
+          mEntry.burnRate = Number((mEntry.vol / mEntry.hrs).toFixed(1));
+        } else {
+          mEntry.burnRate = null;
+        }
+      });
+      u.overallBurnRate = u.totalHrs > 0 ? Number((u.totalVol / u.totalHrs).toFixed(1)) : 0;
+    });
+
+    return map;
+  }, [propRecords, propUnitPlans, activeEgyPlans]);
+
+  // Group units by clean canonical EGY name
+  const unitsByEgy = useMemo(() => {
+    const groups: Record<string, UnitMonthlyAgg[]> = {};
+    Object.values(unitMonthlyMap).forEach((unit: UnitMonthlyAgg) => {
+      const egyKey = cleanEgyName(unit.egy).toUpperCase();
+      if (!groups[egyKey]) {
+        groups[egyKey] = [];
+      }
+      groups[egyKey].push(unit);
+    });
+
+    // Sort units within each EGY naturally by Unit ID
+    Object.keys(groups).forEach(k => {
+      groups[k].sort((a, b) => a.idAlat.localeCompare(b.idAlat, undefined, { numeric: true }));
+    });
+
+    return groups;
+  }, [unitMonthlyMap]);
+
+  // Sort EGY categories (Bulldozer, Excavator, etc.) by worst achievement / over plan by default
+  const sortedEquipmentTypes = useMemo(() => {
+    const types = uniqueEquipmentTypes.filter((t) => selectedHighlightType === "SEMUA" || selectedHighlightType === t);
+
+    // Calculate comprehensive stats for each EGY
+    const typeStats = types.map(type => {
+      const cleanType = cleanEgyName(type).toUpperCase();
+      const planValue = activeEgyPlans[cleanType] || activeEgyPlans[type] || DEFAULT_TYPE_PLANS[cleanType] || DEFAULT_TYPE_PLANS[type] || 0;
+      
+      let totalVol = 0;
+      let totalHrs = 0;
+      let activeMonthsCount = 0;
+      
+      currentMonths.forEach(m => {
+        const cell = pivotTableData[type]?.[m];
+        if (cell && cell.count > 0) {
+          totalVol += cell.vol;
+          totalHrs += cell.hrs;
+          activeMonthsCount++;
+        }
+      });
+
+      const actualRate = totalHrs > 0 ? totalVol / totalHrs : 0;
+      const variance = planValue > 0 ? (actualRate - planValue) : 0;
+      const pctOver = planValue > 0 ? ((actualRate - planValue) / planValue) * 100 : 0;
+      const isOver = planValue > 0 && actualRate > (planValue + 0.05);
+
+      return {
+        type,
+        cleanType,
+        planValue,
+        actualRate,
+        variance,
+        pctOver,
+        isOver,
+        totalVol,
+        totalHrs,
+        activeMonthsCount
+      };
+    });
+
+    if (activeMonthSort) {
+      const { month, direction } = activeMonthSort;
+      typeStats.sort((a, b) => {
+        const cellA = pivotTableData[a.type]?.[month];
+        const cellB = pivotTableData[b.type]?.[month];
+        const valA = cellA && cellA.hrs > 0 ? cellA.vol / cellA.hrs : (direction === "desc" ? -9999 : 9999);
+        const valB = cellB && cellB.hrs > 0 ? cellB.vol / cellB.hrs : (direction === "desc" ? -9999 : 9999);
+        return direction === "desc" ? valB - valA : valA - valB;
+      });
+      return typeStats.map(s => s.type);
+    }
+
+    switch (sortOption) {
+      case "worst_achievement": // Default: Over-plan highest first (worst achievement)
+        typeStats.sort((a, b) => {
+          if (a.planValue > 0 && b.planValue > 0) {
+            return b.variance - a.variance;
+          }
+          if (a.planValue > 0) return a.variance > 0 ? -1 : 1;
+          if (b.planValue > 0) return b.variance > 0 ? 1 : -1;
+          return b.actualRate - a.actualRate;
+        });
+        break;
+
+      case "best_achievement": // Under-plan / most fuel-efficient first
+        typeStats.sort((a, b) => {
+          if (a.planValue > 0 && b.planValue > 0) {
+            return a.variance - b.variance;
+          }
+          if (a.planValue > 0) return a.variance <= 0 ? -1 : 1;
+          if (b.planValue > 0) return b.variance <= 0 ? 1 : -1;
+          return a.actualRate - b.actualRate;
+        });
+        break;
+
+      case "name_asc":
+        typeStats.sort((a, b) => a.type.localeCompare(b.type));
+        break;
+
+      case "name_desc":
+        typeStats.sort((a, b) => b.type.localeCompare(a.type));
+        break;
+
+      case "volume_desc":
+        typeStats.sort((a, b) => b.totalVol - a.totalVol);
+        break;
+
+      case "hours_desc":
+        typeStats.sort((a, b) => b.totalHrs - a.totalHrs);
+        break;
+    }
+
+    return typeStats.map(s => s.type);
+  }, [uniqueEquipmentTypes, selectedHighlightType, activeEgyPlans, currentMonths, pivotTableData, sortOption, activeMonthSort]);
+
   // Compute Maximum Metrics for scaling our custom SVG Graph
   const chartMaxVal = useMemo(() => {
     let max = 1;
@@ -1677,8 +1934,15 @@ export default function YearlyReview({
         if (val > max) max = val;
       });
     });
-    return max * 1.15; // Give 15% padding at top
-  }, [uniqueEquipmentTypes, currentMonths, pivotTableData, activeAnalysisMetric, selectedHighlightType]);
+
+    if (selectedHighlightType !== "SEMUA" && activeAnalysisMetric === "burnRate") {
+      const cleanType = cleanEgyName(selectedHighlightType).toUpperCase();
+      const planVal = activeEgyPlans[cleanType] || DEFAULT_TYPE_PLANS[cleanType] || 0;
+      if (planVal > max) max = planVal;
+    }
+
+    return max * 1.22; // Give 22% padding at top for labels
+  }, [uniqueEquipmentTypes, currentMonths, pivotTableData, activeAnalysisMetric, selectedHighlightType, activeEgyPlans]);
 
   // Modern soft distinctive colors for lines/areas of types
   const typeColors: Record<string, string> = {
@@ -1850,41 +2114,56 @@ export default function YearlyReview({
               </div>
             </div>
  
-            {/* Metric switches */}
-            <div className="flex bg-slate-100 p-1.5 rounded-lg border border-slate-200/50 self-start sm:self-center">
+            {/* Metric switches & Label Toggle */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex bg-slate-100 p-1.5 rounded-lg border border-slate-200/50 self-start sm:self-center">
+                <button
+                  onClick={() => setActiveAnalysisMetric("burnRate")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeAnalysisMetric === "burnRate"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  L/Jam
+                </button>
+                <button
+                  onClick={() => setActiveAnalysisMetric("volume")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeAnalysisMetric === "volume"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  Volume (L)
+                </button>
+                <button
+                  onClick={() => setActiveAnalysisMetric("hours")}
+                  className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
+                    activeAnalysisMetric === "hours"
+                      ? "bg-white text-slate-800 shadow-sm"
+                      : "text-slate-500 hover:text-slate-700"
+                  }`}
+                >
+                  HM (Jam)
+                </button>
+              </div>
+
               <button
-                onClick={() => setActiveAnalysisMetric("burnRate")}
-                className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
-                  activeAnalysisMetric === "burnRate"
-                    ? "bg-white text-slate-800 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
+                onClick={() => setShowChartLabels(prev => !prev)}
+                className={`flex items-center gap-1.5 text-[10px] font-extrabold px-3 py-2 rounded-lg border transition active:scale-95 cursor-pointer ${
+                  showChartLabels
+                    ? "bg-blue-50 border-blue-200 text-[#4682B4] shadow-2xs"
+                    : "bg-slate-50 border-slate-200 text-slate-400 hover:text-slate-600"
                 }`}
+                title={showChartLabels ? "Sembunyikan angka visual di grafik" : "Tampilkan angka visual di grafik"}
               >
-                L/Jam
-              </button>
-              <button
-                onClick={() => setActiveAnalysisMetric("volume")}
-                className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
-                  activeAnalysisMetric === "volume"
-                    ? "bg-white text-slate-800 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                Volume (L)
-              </button>
-              <button
-                onClick={() => setActiveAnalysisMetric("hours")}
-                className={`text-[10px] font-extrabold px-3 py-1.5 rounded transition active:scale-95 cursor-pointer ${
-                  activeAnalysisMetric === "hours"
-                    ? "bg-white text-slate-800 shadow-sm"
-                    : "text-slate-500 hover:text-slate-700"
-                }`}
-              >
-                HM (Jam)
+                <Tag className="w-3.5 h-3.5" />
+                <span>{showChartLabels ? "Angka: Tampil" : "Angka: Sembunyi"}</span>
               </button>
             </div>
           </div>
- 
+
           {/* Interactive Legend Dropdown */}
           <div className="flex flex-col sm:flex-row sm:items-center gap-3 bg-slate-50 p-3 rounded-xl border border-slate-100">
             <span className="text-[11px] font-black text-slate-500 uppercase tracking-wider">Kategori Tipe Alat Berat:</span>
@@ -1922,7 +2201,7 @@ export default function YearlyReview({
                 <p className="text-[10px] text-slate-400 mt-1">Harap pastikan workbook Excel Anda berisi minimal 2 bulan/sheet pengisian.</p>
               </div>
             ) : (
-              <svg viewBox="0 0 850 300" className="w-full h-auto overflow-visible select-none">
+              <svg viewBox="0 0 850 305" className="w-full h-auto overflow-visible select-none">
                 {/* Horizontal Grid lines */}
                 {[0, 0.25, 0.5, 0.75, 1].map((p, i) => {
                   const yVal = 250 - p * 200;
@@ -1953,6 +2232,47 @@ export default function YearlyReview({
                   );
                 })}
 
+                {/* Plan Benchmark Reference Line when a specific type is selected in L/Jam mode */}
+                {selectedHighlightType !== "SEMUA" && activeAnalysisMetric === "burnRate" && (() => {
+                  const cleanType = cleanEgyName(selectedHighlightType).toUpperCase();
+                  const planVal = activeEgyPlans[cleanType] || DEFAULT_TYPE_PLANS[cleanType] || 0;
+                  if (planVal <= 0) return null;
+                  const planY = 250 - (planVal / chartMaxVal) * 200;
+
+                  return (
+                    <g key="plan-benchmark-line">
+                      <line
+                        x1="55"
+                        y1={planY}
+                        x2="820"
+                        y2={planY}
+                        stroke="#EF4444"
+                        strokeWidth="1.5"
+                        strokeDasharray="6,4"
+                      />
+                      <rect
+                        x="715"
+                        y={Math.max(6, planY - 18)}
+                        width="105"
+                        height="16"
+                        rx="4"
+                        fill="#FFE4E6"
+                        stroke="#FDA4AF"
+                        strokeWidth="1"
+                        className="filter drop-shadow-xs"
+                      />
+                      <text
+                        x="767"
+                        y={Math.max(6, planY - 18) + 11.5}
+                        textAnchor="middle"
+                        className="text-[9px] font-mono font-black fill-[#E11D48]"
+                      >
+                        Target: {planVal.toFixed(1)} L/Jam
+                      </text>
+                    </g>
+                  );
+                })()}
+
                 {/* X Axis Month Labels */}
                 {currentMonths.map((m, mIdx) => {
                   const xVal = 80 + mIdx * ((820 - 80) / (currentMonths.length - 1));
@@ -1961,7 +2281,7 @@ export default function YearlyReview({
                       {/* Vertical line helper */}
                       <line
                         x1={xVal}
-                        y1="50"
+                        y1="40"
                         x2={xVal}
                         y2="250"
                         stroke="#F1F5F9"
@@ -2039,29 +2359,79 @@ export default function YearlyReview({
                         />
                       )}
 
-                      {/* Points Circles */}
+                      {/* Points Circles and Visual Data Labels */}
                       {points.map((p, pIdx) => {
                         const formattedVal = (activeAnalysisMetric === "burnRate")
                           ? `${p.val.toFixed(2)} L/Jam`
                           : `${Math.round(p.val).toLocaleString("id-ID")} ${activeAnalysisMetric === "volume" ? "Liter" : "Jam"}`;
 
+                        const cleanType = cleanEgyName(t).toUpperCase();
+                        const egyPlan = activeEgyPlans[cleanType] || DEFAULT_TYPE_PLANS[cleanType] || 0;
+                        const isOverPlan = activeAnalysisMetric === "burnRate" && egyPlan > 0 && p.val > (egyPlan + 0.1);
+
+                        // Short number to display on visual badge
+                        const shortNumber = activeAnalysisMetric === "burnRate"
+                          ? p.val.toFixed(1)
+                          : activeAnalysisMetric === "volume"
+                          ? Math.round(p.val) >= 100000
+                            ? `${(p.val / 1000).toFixed(0)}k`
+                            : Math.round(p.val).toLocaleString("id-ID")
+                          : Math.round(p.val).toLocaleString("id-ID");
+
+                        const shouldShowLabel = showChartLabels && p.val > 0 && (selectedHighlightType === t || selectedHighlightType === "SEMUA");
+
                         return (
                           <g key={pIdx} className="group/dot">
+                            {/* Visual Value Badge Directly Above Point */}
+                            {shouldShowLabel && (
+                              <g className="transition-all select-none">
+                                {/* Pill background */}
+                                <rect
+                                  x={p.x - 23}
+                                  y={Math.max(6, p.y - 30)}
+                                  width="46"
+                                  height="18"
+                                  rx="5"
+                                  fill={isOverPlan ? "#FFF1F2" : "#FFFFFF"}
+                                  stroke={isOverPlan ? "#E11D48" : strokeColor}
+                                  strokeWidth={selectedHighlightType === t ? "1.8" : "1.2"}
+                                  className="filter drop-shadow-xs"
+                                />
+                                {/* Indicator pointer notch */}
+                                <polygon
+                                  points={`${p.x - 3.5},${Math.max(6, p.y - 30) + 18} ${p.x + 3.5},${Math.max(6, p.y - 30) + 18} ${p.x},${Math.max(6, p.y - 30) + 22.5}`}
+                                  fill={isOverPlan ? "#E11D48" : strokeColor}
+                                />
+                                {/* Number text inside badge */}
+                                <text
+                                  x={p.x}
+                                  y={Math.max(6, p.y - 30) + 12.5}
+                                  textAnchor="middle"
+                                  fill={isOverPlan ? "#BE123C" : (selectedHighlightType === t ? "#0F172A" : strokeColor)}
+                                  className="text-[10.5px] font-mono font-black"
+                                >
+                                  {shortNumber}
+                                </text>
+                              </g>
+                            )}
+
+                            {/* Circle Dot on curve */}
                             <circle
                               cx={p.x}
                               cy={p.y}
-                              r={selectedHighlightType === t ? "6" : "4"}
+                              r={selectedHighlightType === t ? "6" : "4.5"}
                               fill={strokeColor}
                               stroke="#FFFFFF"
                               strokeWidth="2"
                               className="transition-transform duration-100 hover:scale-150 cursor-pointer"
                             />
-                            {/* Hover Tooltip inside SVG directly */}
+
+                            {/* Detailed Hover Tooltip */}
                             <g className="opacity-0 group-hover/dot:opacity-100 transition-opacity duration-150 pointer-events-none">
                               <rect
-                                x={p.x - 65}
-                                y={p.y - 36}
-                                width="130"
+                                x={p.x - 70}
+                                y={Math.max(4, p.y - 60)}
+                                width="140"
                                 height="28"
                                 rx="6"
                                 fill="#1E293B"
@@ -2069,7 +2439,7 @@ export default function YearlyReview({
                               />
                               <text
                                 x={p.x}
-                                y={p.y - 20}
+                                y={Math.max(4, p.y - 60) + 17}
                                 fill="#FFFFFF"
                                 className="text-[9px] font-extrabold"
                                 textAnchor="middle"
@@ -2090,12 +2460,52 @@ export default function YearlyReview({
 
         {/* COMPARISON PIVOT GRID CARD (Full-Width, placed below chart) */}
         <div className="bg-white border border-slate-200 shadow-sm rounded-xl p-5 sm:p-6 space-y-4">
-          <div className="space-y-1 pb-1 border-b border-slate-100">
-            <div className="flex items-center gap-2">
-              <Table className="w-5 h-5 text-slate-700" />
-              <h3 className="text-sm font-extrabold text-slate-800">Tabel Fuel Burn</h3>
+          <div className="flex flex-col md:flex-row md:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-2">
+                <Table className="w-5 h-5 text-slate-700" />
+                <h3 className="text-sm font-extrabold text-slate-800">Tabel Fuel Burn</h3>
+              </div>
+              <p className="text-[11px] text-slate-500 font-medium">
+                Klik baris alat berat untuk melihat rincian nomor unit individual beserta data fuel burn bulan per bulan
+              </p>
             </div>
-            <p className="text-[10px] text-slate-400 font-bold">Tabel evaluasi log bahan bakar berdasarkan rentang periode aktif</p>
+
+            {/* Table Action & Sorting Controls */}
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex items-center gap-1.5 bg-slate-50 border border-slate-250 px-2.5 py-1.5 rounded-lg text-xs font-bold text-slate-700">
+                <SlidersHorizontal className="w-3.5 h-3.5 text-slate-500" />
+                <span className="text-[11px] text-slate-500 font-normal">Urutkan:</span>
+                <select
+                  value={activeMonthSort ? `month_${activeMonthSort.month}` : sortOption}
+                  onChange={(e) => {
+                    const val = e.target.value;
+                    setActiveMonthSort(null);
+                    setSortOption(val as SortOption);
+                  }}
+                  className="bg-transparent font-bold text-slate-800 text-xs focus:outline-none cursor-pointer"
+                >
+                  <option value="worst_achievement">🔴 Pencapaian Terburuk (Over Plan Tertinggi)</option>
+                  <option value="best_achievement">🟢 Pencapaian Terbaik (Paling Hemat / Di Bawah Plan)</option>
+                  <option value="name_asc">🔤 Nama Egy Alat (A - Z)</option>
+                  <option value="name_desc">🔤 Nama Egy Alat (Z - A)</option>
+                  <option value="volume_desc">📊 Konsumsi Solar Tertinggi (Liter)</option>
+                  <option value="hours_desc">⏱️ Jam Operasi Terbanyak (HM)</option>
+                </select>
+              </div>
+
+              {/* Bulk Expand / Collapse Toggle Buttons */}
+              <button
+                type="button"
+                onClick={expandedEgys.size === uniqueEquipmentTypes.length ? collapseAllEgys : expandAllEgys}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-bold rounded-lg border border-slate-200 bg-white hover:bg-slate-50 text-slate-700 transition cursor-pointer shadow-2xs"
+              >
+                <Layers className="w-3.5 h-3.5 text-blue-600" />
+                <span>
+                  {expandedEgys.size === uniqueEquipmentTypes.length ? "Tutup Semua Unit" : "Buka Semua Unit"}
+                </span>
+              </button>
+            </div>
           </div>
 
           {/* Table container */}
@@ -2103,66 +2513,231 @@ export default function YearlyReview({
             <table className="w-full text-left text-xs font-sans border-collapse">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-100 text-slate-600 font-bold uppercase tracking-wider">
-                  <th className="p-3 font-extrabold sticky left-0 bg-slate-50 border-r border-slate-100">Egy Alat (Equipment)</th>
-                  {currentMonths.map(m => (
-                    <th key={m} className="p-3 text-center font-extrabold whitespace-nowrap min-w-[85px]">{m}</th>
-                  ))}
-                  <th className="p-3 text-center font-extrabold bg-slate-100/50 min-w-[80px]">Plan</th>
+                  <th 
+                    onClick={() => {
+                      setActiveMonthSort(null);
+                      setSortOption(prev => prev === "name_asc" ? "name_desc" : "name_asc");
+                    }}
+                    className="p-3 font-extrabold sticky left-0 bg-slate-50 border-r border-slate-100 cursor-pointer hover:bg-slate-100/80 transition"
+                  >
+                    <div className="flex items-center gap-1.5">
+                      <span>Egy Alat (Equipment)</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                    </div>
+                  </th>
+                  {currentMonths.map(m => {
+                    const isSortedThisMonth = activeMonthSort?.month === m;
+                    return (
+                      <th 
+                        key={m} 
+                        onClick={() => {
+                          setActiveMonthSort(prev => {
+                            if (prev?.month === m) {
+                              return prev.direction === "desc" ? { month: m, direction: "asc" } : null;
+                            }
+                            return { month: m, direction: "desc" };
+                          });
+                        }}
+                        className={`p-3 text-center font-extrabold whitespace-nowrap min-w-[85px] cursor-pointer hover:bg-slate-100 transition ${
+                          isSortedThisMonth ? "bg-blue-50 text-blue-800" : ""
+                        }`}
+                      >
+                        <div className="flex items-center justify-center gap-1">
+                          <span>{m}</span>
+                          {isSortedThisMonth && (
+                            <span className="text-[10px]">{activeMonthSort.direction === "desc" ? "↓" : "↑"}</span>
+                          )}
+                        </div>
+                      </th>
+                    );
+                  })}
+                  <th 
+                    onClick={() => {
+                      setActiveMonthSort(null);
+                      setSortOption(prev => prev === "worst_achievement" ? "best_achievement" : "worst_achievement");
+                    }}
+                    className="p-3 text-center font-extrabold bg-slate-100/50 min-w-[80px] cursor-pointer hover:bg-slate-200/60 transition"
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Plan</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                    </div>
+                  </th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 text-slate-700">
-                {uniqueEquipmentTypes
-                  .filter((t) => selectedHighlightType === "SEMUA" || selectedHighlightType === t)
-                  .map((type) => {
-                    const cleanType = cleanEgyName(type).toUpperCase();
-                    const planValue = activeEgyPlans[cleanType] || activeEgyPlans[type] || DEFAULT_TYPE_PLANS[cleanType] || DEFAULT_TYPE_PLANS[type] || 0;
-                  
+                {sortedEquipmentTypes.map((type) => {
+                  const cleanType = cleanEgyName(type).toUpperCase();
+                  const planValue = activeEgyPlans[cleanType] || activeEgyPlans[type] || DEFAULT_TYPE_PLANS[cleanType] || DEFAULT_TYPE_PLANS[type] || 0;
+                  const isExpanded = expandedEgys.has(type);
+                  const unitsInThisEgy = unitsByEgy[cleanType] || unitsByEgy[type.toUpperCase()] || [];
+
                   return (
-                    <tr key={type} className="hover:bg-slate-50/50 transition">
-                      {/* Name Col */}
-                      <td className="p-3 font-bold text-slate-800 sticky left-0 bg-white border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] whitespace-nowrap">
-                        {type}
-                      </td>
+                    <React.Fragment key={type}>
+                      {/* PARENT EGY ROW (Clickable to expand individual units) */}
+                      <tr 
+                        onClick={() => toggleExpandEgy(type)}
+                        className={`group cursor-pointer transition-colors ${
+                          isExpanded 
+                            ? "bg-slate-50/90" 
+                            : "hover:bg-slate-50/70"
+                        }`}
+                      >
+                        {/* Name Col with Expand Indicator & Unit Count */}
+                        <td className="p-3 font-bold text-slate-800 sticky left-0 bg-white group-hover:bg-slate-50/80 transition-colors border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] whitespace-nowrap">
+                          <div className="flex items-center justify-between gap-3">
+                            <div className="flex items-center gap-2">
+                              <span className={`p-1 rounded text-slate-400 group-hover:text-blue-600 group-hover:bg-blue-50 transition-all ${
+                                isExpanded ? "rotate-90 text-blue-600 bg-blue-100/70" : ""
+                              }`}>
+                                <ChevronRight className="w-3.5 h-3.5 transition-transform" />
+                              </span>
+                              <span className="font-extrabold text-xs text-slate-900 tracking-tight">{type}</span>
+                            </div>
+                            {unitsInThisEgy.length > 0 && (
+                              <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full transition-colors ${
+                                isExpanded 
+                                  ? "bg-blue-100 text-blue-800" 
+                                  : "bg-slate-100 text-slate-500 group-hover:bg-slate-200"
+                              }`}>
+                                {unitsInThisEgy.length} Unit
+                              </span>
+                            )}
+                          </div>
+                        </td>
 
-                      {/* Monthly Value Cells */}
-                      {currentMonths.map(month => {
-                        const cell = pivotTableData[type]?.[month];
-                        let content = "-";
-                        let isOverPlan = false;
+                        {/* Monthly Value Cells */}
+                        {currentMonths.map(month => {
+                          const cell = pivotTableData[type]?.[month];
+                          let content = "-";
+                          let isOverPlan = false;
 
-                        if (cell && cell.count > 0) {
-                          if (activeAnalysisMetric === "burnRate") {
-                            const rate = cell.hrs > 0 ? cell.vol / cell.hrs : 0;
-                            content = rate.toFixed(1);
-                            isOverPlan = planValue > 0 && rate > (planValue + 0.1);
-                          } else if (activeAnalysisMetric === "volume") {
-                            content = Math.round(cell.vol).toLocaleString("id-ID");
-                          } else {
-                            content = Math.round(cell.hrs).toLocaleString("id-ID");
+                          if (cell && cell.count > 0) {
+                            if (activeAnalysisMetric === "burnRate") {
+                              const rate = cell.hrs > 0 ? cell.vol / cell.hrs : 0;
+                              content = rate.toFixed(1);
+                              isOverPlan = planValue > 0 && rate > (planValue + 0.1);
+                            } else if (activeAnalysisMetric === "volume") {
+                              content = Math.round(cell.vol).toLocaleString("id-ID");
+                            } else {
+                              content = Math.round(cell.hrs).toLocaleString("id-ID");
+                            }
                           }
-                        }
 
-                        return (
-                          <td
-                            key={month}
-                            className={`p-3 text-center font-mono ${
-                              isOverPlan 
-                                ? "bg-rose-50 text-rose-600 font-extrabold" 
-                                : cell && cell.count > 0 && activeAnalysisMetric === "burnRate"
-                                ? "bg-emerald-50 text-emerald-700"
-                                : ""
-                            }`}
-                          >
-                            {content}
-                          </td>
-                        );
-                      })}
+                          return (
+                            <td
+                              key={month}
+                              className={`p-3 text-center font-mono ${
+                                isOverPlan 
+                                  ? "bg-rose-50 text-rose-600 font-extrabold" 
+                                  : cell && cell.count > 0 && activeAnalysisMetric === "burnRate"
+                                  ? "bg-emerald-50 text-emerald-700 font-semibold"
+                                  : ""
+                              }`}
+                            >
+                              {content}
+                            </td>
+                          );
+                        })}
 
-                      {/* Plan Col */}
-                      <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-500">
-                        {planValue > 0 ? planValue : "-"}
-                      </td>
-                    </tr>
+                        {/* Plan Col */}
+                        <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-600">
+                          {planValue > 0 ? planValue : "-"}
+                        </td>
+                      </tr>
+
+                      {/* EXPANDED SUB-ROWS: INDIVIDUAL UNITS */}
+                      {isExpanded && (
+                        <>
+                          {unitsInThisEgy.length > 0 ? (
+                            unitsInThisEgy.map((unit, uIdx) => {
+                              const unitPlan = unit.unitPlan > 0 ? unit.unitPlan : planValue;
+                              const isLastUnit = uIdx === unitsInThisEgy.length - 1;
+
+                              return (
+                                <tr 
+                                  key={unit.idAlat} 
+                                  className={`bg-slate-50/70 hover:bg-blue-50/40 transition-colors ${
+                                    isLastUnit ? "border-b-2 border-slate-200" : "border-b border-slate-100/80"
+                                  }`}
+                                >
+                                  {/* Sub-row Unit ID column */}
+                                  <td className="py-2.5 px-3 pl-8 font-medium text-slate-700 sticky left-0 bg-slate-50/95 border-r border-slate-100 shadow-[2px_0_5px_-2px_rgba(0,0,0,0.05)] whitespace-nowrap">
+                                    <div className="flex items-center gap-2 font-mono text-[11px] flex-wrap">
+                                      <CornerDownRight className="w-3.5 h-3.5 text-blue-400 shrink-0 select-none" />
+                                      <span className="font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-250 shadow-2xs">
+                                        {unit.idAlat}
+                                      </span>
+                                      {unit.hasRenamedPattern && (
+                                        <span 
+                                          className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
+                                          title={`Unit ${unit.idAlat} tercatat sebagai ${unit.legacyId} pada bulan Januari - April 2026`}
+                                        >
+                                          ex: {unit.legacyId}
+                                        </span>
+                                      )}
+                                      {unit.typeAlat && (
+                                        <span className="text-[10px] text-slate-500 font-sans truncate max-w-[150px]" title={unit.typeAlat}>
+                                          {unit.typeAlat}
+                                        </span>
+                                      )}
+                                    </div>
+                                  </td>
+
+                                  {/* Unit Monthly Fuel Burn Cells */}
+                                  {currentMonths.map(month => {
+                                    const cell = unit.monthly[month];
+                                    let content = "-";
+                                    let isUnitOverPlan = false;
+                                    let hasData = false;
+
+                                    if (cell && cell.hrs > 0 && cell.burnRate !== null) {
+                                      content = cell.burnRate.toFixed(1);
+                                      hasData = true;
+                                      isUnitOverPlan = unitPlan > 0 && cell.burnRate > (unitPlan + 0.1);
+                                    }
+
+                                    const isJanApr = ["Januari", "Februari", "Maret", "April"].includes(month);
+                                    const cellTooltip = hasData
+                                      ? `${unit.idAlat} | ${month}: ${content} L/Jam (${Math.round(cell.vol).toLocaleString("id-ID")} L / ${Math.round(cell.hrs).toLocaleString("id-ID")} Jam)${
+                                          unit.hasRenamedPattern && isJanApr ? ` [Unit terdata: ${unit.legacyId}]` : ""
+                                        }`
+                                      : `Tidak ada data operasi ${unit.idAlat} pada bulan ${month}`;
+
+                                    return (
+                                      <td
+                                        key={month}
+                                        title={cellTooltip}
+                                        className={`py-2 px-3 text-center font-mono text-[11px] ${
+                                          hasData
+                                            ? isUnitOverPlan
+                                              ? "bg-rose-50/90 text-rose-600 font-bold"
+                                              : "bg-emerald-50/90 text-emerald-700 font-semibold"
+                                            : "text-slate-300"
+                                        }`}
+                                      >
+                                        {content}
+                                      </td>
+                                    );
+                                  })}
+
+                                  {/* Unit Plan Column */}
+                                  <td className="py-2 px-3 text-center font-mono text-[11px] font-bold bg-slate-100/40 text-slate-500">
+                                    {unitPlan > 0 ? unitPlan : "-"}
+                                  </td>
+                                </tr>
+                              );
+                            })
+                          ) : (
+                            <tr className="bg-slate-50/50 border-b border-slate-200">
+                              <td colSpan={currentMonths.length + 2} className="p-4 text-center text-xs text-slate-400 italic">
+                                Belum ada log nomor unit individual untuk kategori {type} pada periode ini.
+                              </td>
+                            </tr>
+                          )}
+                        </>
+                      )}
+                    </React.Fragment>
                   );
                 })}
               </tbody>

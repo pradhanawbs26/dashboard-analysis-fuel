@@ -2000,6 +2000,8 @@ export default function App() {
           <YearlyReview 
             onBackToDashboard={() => setActiveTab("dashboard")} 
             egyPlans={egyPlans} 
+            unitPlans={plans}
+            records={records}
             onOpenPlanManager={() => setActiveTab("plan")} 
             onSyncRecords={(newRecs) => setRecords(newRecs)}
             onSelectMonthForDashboard={(mName) => {
@@ -2495,119 +2497,76 @@ export default function App() {
         )}
 
         {/* Interactive Filters Panel */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 flex flex-col xl:flex-row gap-5 items-stretch xl:items-center justify-between font-sans">
+        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 flex flex-wrap items-center gap-4 sm:gap-6 font-sans">
           
-          {/* Calendar Picker Range & Month Selector */}
-          <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-4">
-            {/* Quick Month Dropdown from Uploaded Data */}
-            {availableMonths.length > 0 && (
-              <div className="flex flex-col">
-                <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                  <Calendar className="w-3 h-3 text-[#4682B4]" />
-                  <span>PILIH BULAN (YEARLY DATA)</span>
-                </label>
-                <select
-                  value={
-                    availableMonths.find(m => m.startDate === startDate && m.endDate === endDate)?.yearMonth ||
-                    availableMonths.find(m => startDate && startDate.startsWith(m.yearMonth))?.yearMonth || ""
-                  }
-                  onChange={(e) => {
-                    if (e.target.value) {
-                      selectMonth(e.target.value);
-                    }
-                  }}
-                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 font-semibold mt-1 focus:border-[#4682B4] focus:outline-none cursor-pointer"
-                >
-                  <option value="">-- Pilih Periode Bulan --</option>
-                  {availableMonths.map(m => (
-                    <option key={m.yearMonth} value={m.yearMonth}>
-                      {m.label} ({m.recordCount} log)
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
-
+          {/* Quick Month Dropdown from Uploaded Data */}
+          {availableMonths.length > 0 && (
             <div className="flex flex-col">
               <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
                 <Calendar className="w-3 h-3 text-[#4682B4]" />
-                <span>RENTANG TANGGAL</span>
+                <span>PILIH BULAN</span>
               </label>
-              <div className="flex items-center gap-2 mt-1">
-                <input
-                  type="date"
-                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
-                  value={startDate}
-                  onChange={(e) => setStartDate(e.target.value)}
-                />
-                <span className="text-slate-400 text-xs font-bold">-</span>
-                <input
-                  type="date"
-                  className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
-                  value={endDate}
-                  onChange={(e) => setEndDate(e.target.value)}
-                />
-              </div>
+              <select
+                value={
+                  availableMonths.find(m => m.startDate === startDate && m.endDate === endDate)?.yearMonth ||
+                  availableMonths.find(m => startDate && startDate.startsWith(m.yearMonth))?.yearMonth || ""
+                }
+                onChange={(e) => {
+                  if (e.target.value) {
+                    selectMonth(e.target.value);
+                  }
+                }}
+                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 font-semibold mt-1 focus:border-[#4682B4] focus:outline-none cursor-pointer"
+              >
+                <option value="">-- Pilih Periode Bulan --</option>
+                {availableMonths.map(m => (
+                  <option key={m.yearMonth} value={m.yearMonth}>
+                    {m.label} ({m.recordCount} log)
+                  </option>
+                ))}
+              </select>
             </div>
-          </div>
+          )}
 
-          {/* Preset Buttons */}
+          {/* Date Range Picker */}
           <div className="flex flex-col">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider">PRESET PERIODE CEPAT</label>
-            <div className="flex flex-wrap items-center gap-1.5 mt-1">
-              <button onClick={() => applyPreset("all")} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1.5 rounded transition cursor-pointer">
-                Semua
-              </button>
-              <button onClick={() => applyPreset("today")} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1.5 rounded transition cursor-pointer">
-                Hari Ini
-              </button>
-              <button onClick={() => applyPreset("last7")} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1.5 rounded transition cursor-pointer">
-                7 Hari
-              </button>
-              <button onClick={() => applyPreset("last30")} className="bg-slate-100 hover:bg-slate-200 text-slate-700 text-[10px] font-bold px-2 py-1.5 rounded transition cursor-pointer">
-                30 Hari
-              </button>
-              <button onClick={() => applyPreset("mtd")} className="bg-teal-50 hover:bg-teal-100 text-[#2F4F4F] text-[10px] font-bold px-2.5 py-1.5 rounded transition cursor-pointer font-bold font-sans">
-                MTD
-              </button>
-              <button onClick={() => applyPreset("ytd")} className="bg-teal-50 hover:bg-teal-100 text-[#2F4F4F] text-[10px] font-bold px-2.5 py-1.5 rounded transition cursor-pointer font-bold font-sans">
-                YTD
-              </button>
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <Calendar className="w-3 h-3 text-[#4682B4]" />
+              <span>RENTANG TANGGAL</span>
+            </label>
+            <div className="flex items-center gap-2 mt-1">
+              <input
+                type="date"
+                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
+                value={startDate}
+                onChange={(e) => setStartDate(e.target.value)}
+              />
+              <span className="text-slate-400 text-xs font-bold">-</span>
+              <input
+                type="date"
+                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 text-slate-800 transition focus:border-[#4682B4] focus:outline-none font-medium"
+                value={endDate}
+                onChange={(e) => setEndDate(e.target.value)}
+              />
             </div>
           </div>
 
-          {/* Advanced Multi-Attribute Filters (Egy Alat, Storage Gate) */}
-          <div className="flex flex-col sm:flex-row gap-4 items-stretch sm:items-center">
-            <div className="flex flex-col">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
-                <Filter className="w-3 h-3 text-[#4682B4]" />
-                <span>EGY ALAT (EQUIPMENT)</span>
-              </label>
-              <select
-                value={selectedEgyFilter}
-                onChange={(e) => setSelectedEgyFilter(e.target.value)}
-                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 mt-1 select-none w-full sm:w-56 focus:border-[#4682B4] focus:outline-none font-medium text-slate-700 cursor-pointer"
-              >
-                <option value="SEMUA">Semua Egy Alat</option>
-                {uniqueEgys.map(egy => (
-                  <option key={egy} value={egy}>{egy}</option>
-                ))}
-              </select>
-            </div>
-
-            <div className="flex flex-col">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider font-sans">LOKASI PENGISIAN FUEL</label>
-              <select
-                value={selectedStorageFilter}
-                onChange={(e) => setSelectedStorageFilter(e.target.value)}
-                className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 mt-1 select-none w-full sm:w-48 focus:border-[#4682B4] focus:outline-none font-medium text-slate-700 cursor-pointer"
-              >
-                <option value="SEMUA">Semua Lokasi Pengisian</option>
-                {uniqueStorages.map(s => (
-                  <option key={s} value={s}>{s}</option>
-                ))}
-              </select>
-            </div>
+          {/* Egy Alat Filter - Placed directly next to Rentang Tanggal */}
+          <div className="flex flex-col">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <Filter className="w-3 h-3 text-[#4682B4]" />
+              <span>EGY ALAT (EQUIPMENT)</span>
+            </label>
+            <select
+              value={selectedEgyFilter}
+              onChange={(e) => setSelectedEgyFilter(e.target.value)}
+              className="text-xs border border-slate-300 rounded px-2.5 py-1.5 bg-slate-50 mt-1 select-none w-full sm:w-60 focus:border-[#4682B4] focus:outline-none font-medium text-slate-700 cursor-pointer"
+            >
+              <option value="SEMUA">Semua Egy Alat</option>
+              {uniqueEgys.map(egy => (
+                <option key={egy} value={egy}>{egy}</option>
+              ))}
+            </select>
           </div>
 
         </div>
