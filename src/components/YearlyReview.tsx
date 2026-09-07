@@ -249,7 +249,7 @@ export default function YearlyReview({
   const [expandedEgys, setExpandedEgys] = useState<Set<string>>(new Set());
 
   // Sorting state: defaults to "worst_achievement" (EGYs with highest over-plan first)
-  type SortOption = "worst_achievement" | "best_achievement" | "name_asc" | "name_desc" | "volume_desc" | "hours_desc";
+  type SortOption = "worst_achievement" | "best_achievement" | "name_asc" | "name_desc" | "volume_desc" | "hours_desc" | "avg_desc" | "avg_asc";
   const [sortOption, setSortOption] = useState<SortOption>("worst_achievement");
   const [activeMonthSort, setActiveMonthSort] = useState<{ month: string; direction: "desc" | "asc" } | null>(null);
 
@@ -1796,7 +1796,7 @@ export default function YearlyReview({
     return map;
   }, [propRecords, propUnitPlans, activeEgyPlans]);
 
-  // Group units by clean canonical EGY name
+  // Group units by clean canonical EGY name and sort by highest average actual fuel burn descending
   const unitsByEgy = useMemo(() => {
     const groups: Record<string, UnitMonthlyAgg[]> = {};
     Object.values(unitMonthlyMap).forEach((unit: UnitMonthlyAgg) => {
@@ -1807,13 +1807,54 @@ export default function YearlyReview({
       groups[egyKey].push(unit);
     });
 
-    // Sort units within each EGY naturally by Unit ID
+    // Helper to calculate unit's average actual value across currentMonths
+    const getUnitAvgValue = (u: UnitMonthlyAgg) => {
+      let totalVol = 0;
+      let totalHrs = 0;
+      let activeMonths = 0;
+      currentMonths.forEach(m => {
+        const c = u.monthly[m];
+        if (c && c.count > 0) {
+          totalVol += c.vol;
+          totalHrs += c.hrs;
+          activeMonths++;
+        }
+      });
+
+      if (activeTableMetric === "volume") {
+        return activeMonths > 0 ? totalVol / activeMonths : 0;
+      }
+      if (activeTableMetric === "hours") {
+        return activeMonths > 0 ? totalHrs / activeMonths : 0;
+      }
+      // Default: Fuel Burn rate (L/Jam)
+      if (totalHrs > 0) {
+        return totalVol / totalHrs;
+      }
+      const validRates = currentMonths
+        .map(m => u.monthly[m]?.burnRate)
+        .filter((r): r is number => typeof r === "number" && !isNaN(r) && r > 0);
+      if (validRates.length > 0) {
+        return validRates.reduce((a, b) => a + b, 0) / validRates.length;
+      }
+      return 0;
+    };
+
+    // Sort units within each EGY by highest average actual fuel burn descending
     Object.keys(groups).forEach(k => {
-      groups[k].sort((a, b) => a.idAlat.localeCompare(b.idAlat, undefined, { numeric: true }));
+      groups[k].sort((a, b) => {
+        const avgA = getUnitAvgValue(a);
+        const avgB = getUnitAvgValue(b);
+        if (Math.abs(avgB - avgA) > 0.001) {
+          return avgB - avgA; // Highest average fuel burn first
+        }
+        // Secondary tie-breaker: natural alphanumeric sort by Unit ID
+        return a.idAlat.localeCompare(b.idAlat, undefined, { numeric: true });
+      });
     });
 
     return groups;
-  }, [unitMonthlyMap]);
+  }, [unitMonthlyMap, currentMonths, activeTableMetric]);
 
   // Sort EGY categories (Bulldozer, Excavator, etc.) by worst achievement / over plan by default
   const sortedEquipmentTypes = useMemo(() => {
@@ -1906,10 +1947,42 @@ export default function YearlyReview({
       case "hours_desc":
         typeStats.sort((a, b) => b.totalHrs - a.totalHrs);
         break;
+
+      case "avg_desc":
+        typeStats.sort((a, b) => {
+          if (activeTableMetric === "volume") {
+            const avgA = a.activeMonthsCount > 0 ? a.totalVol / a.activeMonthsCount : 0;
+            const avgB = b.activeMonthsCount > 0 ? b.totalVol / b.activeMonthsCount : 0;
+            return avgB - avgA;
+          }
+          if (activeTableMetric === "hours") {
+            const avgA = a.activeMonthsCount > 0 ? a.totalHrs / a.activeMonthsCount : 0;
+            const avgB = b.activeMonthsCount > 0 ? b.totalHrs / b.activeMonthsCount : 0;
+            return avgB - avgA;
+          }
+          return b.actualRate - a.actualRate;
+        });
+        break;
+
+      case "avg_asc":
+        typeStats.sort((a, b) => {
+          if (activeTableMetric === "volume") {
+            const avgA = a.activeMonthsCount > 0 ? a.totalVol / a.activeMonthsCount : 0;
+            const avgB = b.activeMonthsCount > 0 ? b.totalVol / b.activeMonthsCount : 0;
+            return avgA - avgB;
+          }
+          if (activeTableMetric === "hours") {
+            const avgA = a.activeMonthsCount > 0 ? a.totalHrs / a.activeMonthsCount : 0;
+            const avgB = b.activeMonthsCount > 0 ? b.totalHrs / b.activeMonthsCount : 0;
+            return avgA - avgB;
+          }
+          return a.actualRate - b.actualRate;
+        });
+        break;
     }
 
     return typeStats.map(s => s.type);
-  }, [uniqueEquipmentTypes, selectedHighlightType, activeEgyPlans, currentMonths, pivotTableData, sortOption, activeMonthSort]);
+  }, [uniqueEquipmentTypes, selectedHighlightType, activeEgyPlans, currentMonths, pivotTableData, sortOption, activeMonthSort, activeTableMetric]);
 
   // Compute Maximum Metrics for scaling our custom SVG Graph
   const chartMaxVal = useMemo(() => {
@@ -2525,6 +2598,8 @@ export default function YearlyReview({
                 >
                   <option value="worst_achievement">🔴 Pencapaian Terburuk (Over Plan Tertinggi)</option>
                   <option value="best_achievement">🟢 Pencapaian Terbaik (Paling Hemat / Di Bawah Plan)</option>
+                  <option value="avg_desc">📈 Average Aktual Tertinggi</option>
+                  <option value="avg_asc">📉 Average Aktual Terendah</option>
                   <option value="name_asc">🔤 Nama Egy Alat (A - Z)</option>
                   <option value="name_desc">🔤 Nama Egy Alat (Z - A)</option>
                   <option value="volume_desc">📊 Konsumsi Solar Tertinggi (Liter)</option>
@@ -2589,6 +2664,28 @@ export default function YearlyReview({
                       </th>
                     );
                   })}
+                  {/* AVERAGE AKTUAL YEARLY REVIEW COLUMN HEADER */}
+                  <th 
+                    onClick={() => {
+                      setActiveMonthSort(null);
+                      setSortOption(prev => prev === "avg_desc" ? "avg_asc" : "avg_desc");
+                    }}
+                    title={`Average Aktual selama periode Yearly Review (${currentMonths[0] || ""} - ${currentMonths[currentMonths.length - 1] || ""})`}
+                    className={`p-3 text-center font-extrabold whitespace-nowrap min-w-[95px] cursor-pointer hover:bg-slate-200/60 transition ${
+                      sortOption === "avg_desc" || sortOption === "avg_asc"
+                        ? "bg-blue-100/80 text-blue-900 border-x border-blue-200"
+                        : "bg-slate-100/60 text-slate-700 border-x border-slate-200/50"
+                    }`}
+                  >
+                    <div className="flex items-center justify-center gap-1">
+                      <span>Avg Aktual</span>
+                      <ArrowUpDown className="w-3 h-3 text-slate-400" />
+                      {(sortOption === "avg_desc" || sortOption === "avg_asc") && (
+                        <span className="text-[10px] text-blue-800">{sortOption === "avg_desc" ? "↓" : "↑"}</span>
+                      )}
+                    </div>
+                  </th>
+                  {/* PLAN / TOTAL COLUMN HEADER */}
                   <th 
                     onClick={() => {
                       setActiveMonthSort(null);
@@ -2618,16 +2715,57 @@ export default function YearlyReview({
                   const isExpanded = expandedEgys.has(type);
                   const unitsInThisEgy = unitsByEgy[cleanType] || unitsByEgy[type.toUpperCase()] || [];
 
-                  // Calculate parent totals across currentMonths
+                  // Calculate parent totals and averages across currentMonths
                   let parentTotalVol = 0;
                   let parentTotalHrs = 0;
+                  let parentActiveMonthsCount = 0;
                   currentMonths.forEach(m => {
                     const c = pivotTableData[type]?.[m];
-                    if (c) {
+                    if (c && c.count > 0) {
                       parentTotalVol += c.vol;
                       parentTotalHrs += c.hrs;
+                      parentActiveMonthsCount++;
                     }
                   });
+
+                  // Calculate parent actual average
+                  let parentAvgDisplay = "-";
+                  let isParentAvgOverPlan = false;
+                  let hasParentAvgData = false;
+
+                  if (activeTableMetric === "burnRate") {
+                    if (parentTotalHrs > 0) {
+                      const avgRate = parentTotalVol / parentTotalHrs;
+                      parentAvgDisplay = avgRate.toFixed(1);
+                      hasParentAvgData = true;
+                      isParentAvgOverPlan = planValue > 0 && avgRate > (planValue + 0.1);
+                    } else {
+                      const validRates = currentMonths
+                        .map(m => {
+                          const c = pivotTableData[type]?.[m];
+                          return c && c.hrs > 0 ? c.vol / c.hrs : null;
+                        })
+                        .filter((r): r is number => typeof r === "number" && !isNaN(r) && r > 0);
+                      if (validRates.length > 0) {
+                        const avgRate = validRates.reduce((a, b) => a + b, 0) / validRates.length;
+                        parentAvgDisplay = avgRate.toFixed(1);
+                        hasParentAvgData = true;
+                        isParentAvgOverPlan = planValue > 0 && avgRate > (planValue + 0.1);
+                      }
+                    }
+                  } else if (activeTableMetric === "volume") {
+                    if (parentActiveMonthsCount > 0) {
+                      const avgVol = parentTotalVol / parentActiveMonthsCount;
+                      parentAvgDisplay = Math.round(avgVol).toLocaleString("id-ID");
+                      hasParentAvgData = true;
+                    }
+                  } else {
+                    if (parentActiveMonthsCount > 0) {
+                      const avgHrs = parentTotalHrs / parentActiveMonthsCount;
+                      parentAvgDisplay = Math.round(avgHrs).toLocaleString("id-ID");
+                      hasParentAvgData = true;
+                    }
+                  }
 
                   return (
                     <React.Fragment key={type}>
@@ -2701,6 +2839,30 @@ export default function YearlyReview({
                           );
                         })}
 
+                        {/* Parent Average Aktual Yearly Review Cell */}
+                        <td 
+                          title={`${type} | Average Aktual Yearly Review: ${parentAvgDisplay} ${
+                            activeTableMetric === "burnRate" 
+                              ? "L/Jam" 
+                              : activeTableMetric === "volume" 
+                              ? "Liter/Bulan" 
+                              : "Jam/Bulan"
+                          } (${Math.round(parentTotalVol).toLocaleString("id-ID")} L / ${Math.round(parentTotalHrs).toLocaleString("id-ID")} Jam)`}
+                          className={`p-3 text-center font-mono border-x border-slate-200/50 ${
+                            activeTableMetric === "burnRate"
+                              ? hasParentAvgData
+                                ? isParentAvgOverPlan 
+                                  ? "bg-rose-100 text-rose-700 font-extrabold" 
+                                  : "bg-emerald-100 text-emerald-800 font-extrabold"
+                                : "text-slate-300"
+                              : hasParentAvgData
+                              ? "bg-slate-100/70 text-slate-900 font-extrabold"
+                              : "text-slate-300"
+                          }`}
+                        >
+                          {parentAvgDisplay}
+                        </td>
+
                         {/* Plan / Total Col */}
                         <td className="p-3 text-center font-mono font-bold bg-slate-100/30 text-slate-700">
                           {activeTableMetric === "burnRate" ? (
@@ -2721,16 +2883,54 @@ export default function YearlyReview({
                               const unitPlan = unit.unitPlan > 0 ? unit.unitPlan : planValue;
                               const isLastUnit = uIdx === unitsInThisEgy.length - 1;
 
-                              // Calculate unit total across currentMonths
+                              // Calculate unit total and averages across currentMonths
                               let unitTotalVol = 0;
                               let unitTotalHrs = 0;
+                              let unitActiveMonthsCount = 0;
                               currentMonths.forEach(m => {
                                 const c = unit.monthly[m];
-                                if (c) {
+                                if (c && c.count > 0) {
                                   unitTotalVol += c.vol;
                                   unitTotalHrs += c.hrs;
+                                  unitActiveMonthsCount++;
                                 }
                               });
+
+                              // Calculate unit actual average
+                              let unitAvgDisplay = "-";
+                              let isUnitAvgOverPlan = false;
+                              let hasUnitAvgData = false;
+
+                              if (activeTableMetric === "burnRate") {
+                                if (unitTotalHrs > 0) {
+                                  const avgRate = unitTotalVol / unitTotalHrs;
+                                  unitAvgDisplay = avgRate.toFixed(1);
+                                  hasUnitAvgData = true;
+                                  isUnitAvgOverPlan = unitPlan > 0 && avgRate > (unitPlan + 0.1);
+                                } else {
+                                  const validRates = currentMonths
+                                    .map(m => unit.monthly[m]?.burnRate)
+                                    .filter((r): r is number => typeof r === "number" && !isNaN(r) && r > 0);
+                                  if (validRates.length > 0) {
+                                    const avgRate = validRates.reduce((a, b) => a + b, 0) / validRates.length;
+                                    unitAvgDisplay = avgRate.toFixed(1);
+                                    hasUnitAvgData = true;
+                                    isUnitAvgOverPlan = unitPlan > 0 && avgRate > (unitPlan + 0.1);
+                                  }
+                                }
+                              } else if (activeTableMetric === "volume") {
+                                if (unitActiveMonthsCount > 0) {
+                                  const avgVol = unitTotalVol / unitActiveMonthsCount;
+                                  unitAvgDisplay = Math.round(avgVol).toLocaleString("id-ID");
+                                  hasUnitAvgData = true;
+                                }
+                              } else {
+                                if (unitActiveMonthsCount > 0) {
+                                  const avgHrs = unitTotalHrs / unitActiveMonthsCount;
+                                  unitAvgDisplay = Math.round(avgHrs).toLocaleString("id-ID");
+                                  hasUnitAvgData = true;
+                                }
+                              }
 
                               return (
                                 <tr 
@@ -2746,14 +2946,6 @@ export default function YearlyReview({
                                       <span className="font-bold text-slate-800 bg-white px-2 py-0.5 rounded border border-slate-250 shadow-2xs">
                                         {unit.idAlat}
                                       </span>
-                                      {unit.hasRenamedPattern && (
-                                        <span 
-                                          className="text-[9px] font-bold px-1.5 py-0.5 rounded bg-amber-50 text-amber-800 border border-amber-200"
-                                          title={`Unit ${unit.idAlat} tercatat sebagai ${unit.legacyId} pada bulan Januari - April 2026`}
-                                        >
-                                          ex: {unit.legacyId}
-                                        </span>
-                                      )}
                                       {unit.typeAlat && (
                                         <span className="text-[10px] text-slate-500 font-sans truncate max-w-[150px]" title={unit.typeAlat}>
                                           {unit.typeAlat}
@@ -2789,7 +2981,6 @@ export default function YearlyReview({
                                       }
                                     }
 
-                                    const isJanApr = ["Januari", "Februari", "Maret", "April"].includes(month);
                                     const cellTooltip = hasData
                                       ? `${unit.idAlat} | ${month}: ${
                                           activeTableMetric === "burnRate"
@@ -2797,9 +2988,7 @@ export default function YearlyReview({
                                             : activeTableMetric === "volume"
                                             ? `${content} Liter`
                                             : `${content} Jam`
-                                        } (${Math.round(cell?.vol || 0).toLocaleString("id-ID")} L / ${Math.round(cell?.hrs || 0).toLocaleString("id-ID")} Jam)${
-                                          unit.hasRenamedPattern && isJanApr ? ` [Unit terdata: ${unit.legacyId}]` : ""
-                                        }`
+                                        } (${Math.round(cell?.vol || 0).toLocaleString("id-ID")} L / ${Math.round(cell?.hrs || 0).toLocaleString("id-ID")} Jam)`
                                       : `Tidak ada data operasi ${unit.idAlat} pada bulan ${month}`;
 
                                     return (
@@ -2823,6 +3012,30 @@ export default function YearlyReview({
                                     );
                                   })}
 
+                                  {/* Unit Average Aktual Yearly Review Cell */}
+                                  <td 
+                                    title={`${unit.idAlat} | Average Aktual Yearly Review: ${unitAvgDisplay} ${
+                                      activeTableMetric === "burnRate" 
+                                        ? "L/Jam" 
+                                        : activeTableMetric === "volume" 
+                                        ? "Liter/Bulan" 
+                                        : "Jam/Bulan"
+                                    } (${Math.round(unitTotalVol).toLocaleString("id-ID")} L / ${Math.round(unitTotalHrs).toLocaleString("id-ID")} Jam)`}
+                                    className={`py-2 px-3 text-center font-mono text-[11px] border-x border-slate-200/50 ${
+                                      activeTableMetric === "burnRate"
+                                        ? hasUnitAvgData
+                                          ? isUnitAvgOverPlan
+                                            ? "bg-rose-100/90 text-rose-700 font-bold"
+                                            : "bg-emerald-100/90 text-emerald-800 font-bold"
+                                          : "text-slate-300"
+                                        : hasUnitAvgData
+                                        ? "bg-slate-100/60 text-slate-800 font-bold"
+                                        : "text-slate-300"
+                                    }`}
+                                  >
+                                    {unitAvgDisplay}
+                                  </td>
+
                                   {/* Unit Plan / Total Column */}
                                   <td className="py-2 px-3 text-center font-mono text-[11px] font-bold bg-slate-100/40 text-slate-600">
                                     {activeTableMetric === "burnRate" ? (
@@ -2838,7 +3051,7 @@ export default function YearlyReview({
                             })
                           ) : (
                             <tr className="bg-slate-50/50 border-b border-slate-200">
-                              <td colSpan={currentMonths.length + 2} className="p-4 text-center text-xs text-slate-400 italic">
+                              <td colSpan={currentMonths.length + 3} className="p-4 text-center text-xs text-slate-400 italic">
                                 Belum ada log nomor unit individual untuk kategori {type} pada periode ini.
                               </td>
                             </tr>
