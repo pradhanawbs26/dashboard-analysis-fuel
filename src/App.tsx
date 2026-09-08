@@ -26,13 +26,14 @@ import {
   Check,
   SlidersHorizontal,
   Cloud,
-  CloudOff
+  CloudOff,
+  CalendarDays
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 import { FuelRecord, EgyPlanMap, UnitRegistryMap } from "./types";
-import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords } from "./data/sampleData";
+import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords, getCanonicalUnitId } from "./data/sampleData";
 import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
@@ -40,6 +41,8 @@ import YearlyReview from "./components/YearlyReview";
 import EgyPlanManagerModal from "./components/EgyPlanManagerModal";
 import PlanVsActualAssessment from "./components/PlanVsActualAssessment";
 import PlanFuelBurnPage from "./components/PlanFuelBurnPage";
+import UnitDailyFuelBurnModal from "./components/UnitDailyFuelBurnModal";
+import UnitSelectorDropdown, { UnitItem } from "./components/UnitSelectorDropdown";
 import { 
   getStoredEgyPlans, 
   saveStoredEgyPlans, 
@@ -191,6 +194,8 @@ export default function App() {
     const meta = getSyncLocalData<{ activeTab?: "dashboard" | "yearly" | "plan" }>("fuel_meta", { activeTab: "dashboard" });
     return meta?.activeTab || "dashboard";
   });
+  const [selectedUnitForDailyModal, setSelectedUnitForDailyModal] = useState<string | null>(null);
+  const [selectedUnitFilter, setSelectedUnitFilter] = useState<string[]>([]);
 
   // File Input and Dialog Reference
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -851,10 +856,39 @@ export default function App() {
   const uniqueEgys = useMemo(() => {
     const egys = new Set<string>();
     records.forEach(r => {
-      if (r.egy) egys.add(r.egy);
+      const egy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+      if (egy) egys.add(egy);
     });
     return Array.from(egys).sort();
   }, [records]);
+
+  // Extract units matching the selected Egy
+  const availableUnitsForEgy = useMemo<UnitItem[]>(() => {
+    const map = new Map<string, UnitItem>();
+    records.forEach(r => {
+      if (!r.idAlat) return;
+      const rEgy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+      if (selectedEgyFilter === "SEMUA" || rEgy === selectedEgyFilter) {
+        const canon = getCanonicalUnitId(r.idAlat).toUpperCase();
+        if (!map.has(canon)) {
+          map.set(canon, {
+            idAlat: r.idAlat,
+            egy: rEgy,
+            typeAlat: r.typeAlat || ""
+          });
+        }
+      }
+    });
+    return Array.from(map.values()).sort((a, b) => 
+      a.idAlat.localeCompare(b.idAlat, undefined, { numeric: true })
+    );
+  }, [records, selectedEgyFilter]);
+
+  // Automatically select all units when EGY filter changes or records change
+  useEffect(() => {
+    const allIds = availableUnitsForEgy.map(u => getCanonicalUnitId(u.idAlat).toUpperCase());
+    setSelectedUnitFilter(allIds);
+  }, [selectedEgyFilter, availableUnitsForEgy]);
 
   const uniqueStorages = useMemo(() => {
     const storages = new Set<string>();
@@ -908,6 +942,7 @@ export default function App() {
       setEndDate(target.endDate);
       setSelectedEgyFilter("SEMUA");
       setSelectedStorageFilter("SEMUA");
+      setSelectedUnitFilter([]);
       saveLocalData("fuel_meta", {
         startDate: target.startDate,
         endDate: target.endDate,
@@ -918,19 +953,31 @@ export default function App() {
 
   // Apply filters to get ACTIVE working records for calculation
   const filteredRecords = useMemo(() => {
+    const unitSet = new Set(selectedUnitFilter.map(id => id.toUpperCase()));
+    const allAvailableCanonIds = availableUnitsForEgy.map(u => getCanonicalUnitId(u.idAlat).toUpperCase());
+    const isAllSelected = selectedUnitFilter.length === 0 || allAvailableCanonIds.every(id => unitSet.has(id));
+
     return records.filter(r => {
       // Date filter match
       const dateMatch = (!startDate || r.tanggal >= startDate) && (!endDate || r.tanggal <= endDate);
       
       // Egy filter match
-      const egyMatch = selectedEgyFilter === "SEMUA" || r.egy === selectedEgyFilter;
+      const rEgy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+      const egyMatch = selectedEgyFilter === "SEMUA" || rEgy === selectedEgyFilter;
 
       // Storage match
       const storageMatch = selectedStorageFilter === "SEMUA" || r.storage === selectedStorageFilter;
 
-      return dateMatch && egyMatch && storageMatch;
+      // Unit filter match
+      let unitMatch = true;
+      if (!isAllSelected && r.idAlat) {
+        const canon = getCanonicalUnitId(r.idAlat).toUpperCase();
+        unitMatch = unitSet.has(canon);
+      }
+
+      return dateMatch && egyMatch && storageMatch && unitMatch;
     });
-  }, [records, startDate, endDate, selectedEgyFilter, selectedStorageFilter]);
+  }, [records, startDate, endDate, selectedEgyFilter, selectedStorageFilter, selectedUnitFilter, availableUnitsForEgy]);
 
   // Compare actual vs plan (List & FC and Egy Plans)
   const unitComparisons = useMemo(() => {
@@ -2569,6 +2616,15 @@ export default function App() {
             </select>
           </div>
 
+          {/* Nomor Unit Selector Checklist - Placed directly next to Egy Alat */}
+          <UnitSelectorDropdown
+            units={availableUnitsForEgy}
+            selectedUnitIds={selectedUnitFilter}
+            onChangeSelectedUnitIds={setSelectedUnitFilter}
+            onUnitClick={(unitId) => setSelectedUnitForDailyModal(unitId)}
+            selectedEgy={selectedEgyFilter}
+          />
+
         </div>
 
         {/* PRINT TARGET CONTAINER - Everything inside is grabbed beautifully for PDF report rendering */}
@@ -2661,9 +2717,16 @@ export default function App() {
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                   <div className="bg-rose-50 border border-rose-100 p-3.5 rounded-xl">
                     <span className="text-[10px] text-rose-500 uppercase tracking-widest font-extrabold block">Unit Terboros (Max Deviation)</span>
-                    <span className="text-lg font-black text-rose-700 mt-1 block">
-                      {overPlanUnits[0].idAlat} <span className="text-xs font-bold text-rose-600">({cleanEgyName(overPlanUnits[0].egy || deriveEgy(overPlanUnits[0].idAlat, overPlanUnits[0].typeAlat))})</span>
-                    </span>
+                    <button 
+                      type="button"
+                      onClick={() => setSelectedUnitForDailyModal(overPlanUnits[0].idAlat)}
+                      className="text-lg font-black text-rose-700 hover:text-rose-900 hover:underline flex items-center gap-1.5 mt-1 cursor-pointer group text-left"
+                      title={`Klik untuk melihat detail Fuel Burn per tanggal (H-1) unit ${overPlanUnits[0].idAlat}`}
+                    >
+                      <span>{overPlanUnits[0].idAlat}</span>
+                      <CalendarDays className="w-4 h-4 text-rose-500 group-hover:scale-110 transition-transform" />
+                      <span className="text-xs font-bold text-rose-600 no-underline">({cleanEgyName(overPlanUnits[0].egy || deriveEgy(overPlanUnits[0].idAlat, overPlanUnits[0].typeAlat))})</span>
+                    </button>
                     <span className="text-xs text-rose-650 mt-1 block">
                       Deviasi: <strong className="font-bold">+{overPlanUnits[0].deviation.toFixed(2)}</strong> L/Jam (<span className="font-extrabold text-slate-800">+{overPlanUnits[0].deviationPct.toFixed(1)}%</span> over plan)
                     </span>
@@ -2707,7 +2770,17 @@ export default function App() {
                     <tbody className="divide-y divide-slate-100 font-medium">
                       {overPlanUnits.map((u, i) => (
                         <tr key={i} className="hover:bg-rose-50/20 transition-all">
-                          <td className="py-3 px-3 font-bold text-slate-800 font-sans">{u.idAlat}</td>
+                          <td className="py-3 px-3 font-bold text-slate-800 font-sans">
+                            <button
+                              type="button"
+                              onClick={() => setSelectedUnitForDailyModal(u.idAlat)}
+                              className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200 transition-all font-mono font-bold cursor-pointer group shadow-2xs"
+                              title={`Klik untuk melihat detail Fuel Burn per tanggal (H-1) unit ${u.idAlat}`}
+                            >
+                              <span>{u.idAlat}</span>
+                              <CalendarDays className="w-3.5 h-3.5 text-[#4682B4] group-hover:scale-110 transition-transform" />
+                            </button>
+                          </td>
                           <td className="py-3 px-3 font-semibold text-slate-700">
                             <span className="bg-slate-100 text-slate-800 px-2 py-0.5 rounded text-[11px] font-bold border border-slate-200">
                               {cleanEgyName(u.egy || deriveEgy(u.idAlat, u.typeAlat))}
@@ -2738,10 +2811,17 @@ export default function App() {
             unitPlans={plans}
             onOpenPlanManager={() => setActiveTab("plan")}
             selectedEgyFilter={selectedEgyFilter}
+            onSelectUnit={(idAlat) => setSelectedUnitForDailyModal(idAlat)}
           />
 
           {/* Central Pareto Layout */}
-          <ParetoChart records={filteredRecords} selectedType="SEMUA" plans={plans} egyPlans={egyPlans} />
+          <ParetoChart 
+            records={filteredRecords} 
+            selectedType="SEMUA" 
+            plans={plans} 
+            egyPlans={egyPlans}
+            onSelectUnit={(idAlat) => setSelectedUnitForDailyModal(idAlat)} 
+          />
 
           {/* Quick Metrics of anomalies across full log */}
           {globalAnomaliesCount > 0 && (
@@ -2779,6 +2859,19 @@ export default function App() {
         currentPlans={egyPlans}
         onSavePlans={handleSaveEgyPlans}
         availableEgysInDataset={availableEgys}
+      />
+
+      {/* MODAL LIHAT RINCIAN FUEL BURN PER TANGGAL (H-1 KONSUMSI) */}
+      <UnitDailyFuelBurnModal
+        isOpen={!!selectedUnitForDailyModal}
+        onClose={() => setSelectedUnitForDailyModal(null)}
+        selectedUnitId={selectedUnitForDailyModal}
+        onSelectUnit={(idAlat) => setSelectedUnitForDailyModal(idAlat)}
+        records={records}
+        startDate={startDate}
+        endDate={endDate}
+        egyPlans={egyPlans}
+        unitPlans={plans}
       />
 
       {/* Corporate Styled Footer */}

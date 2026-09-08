@@ -14,7 +14,8 @@ import {
   BarChart3,
   Layers,
   Sparkles,
-  Info
+  Info,
+  CalendarDays
 } from "lucide-react";
 import { FuelRecord, EgyPlanMap, EgyAssessmentItem } from "../types";
 import { evaluateEgyPlanVsActual } from "../lib/egyPlanService";
@@ -25,6 +26,7 @@ interface PlanVsActualAssessmentProps {
   unitPlans?: Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>;
   onOpenPlanManager: () => void;
   selectedEgyFilter?: string;
+  onSelectUnit?: (idAlat: string) => void;
 }
 
 export default function PlanVsActualAssessment({
@@ -32,7 +34,8 @@ export default function PlanVsActualAssessment({
   egyPlans,
   unitPlans,
   onOpenPlanManager,
-  selectedEgyFilter = "SEMUA"
+  selectedEgyFilter = "SEMUA",
+  onSelectUnit
 }: PlanVsActualAssessmentProps) {
   const [expandedEgy, setExpandedEgy] = useState<string | null>(null);
   const [statusFilter, setStatusFilter] = useState<"ALL" | "OVER" | "EFFICIENT">("ALL");
@@ -431,7 +434,24 @@ export default function PlanVsActualAssessment({
                               <tbody className="divide-y divide-slate-100 font-medium">
                                 {item.units.map(u => (
                                   <tr key={u.idAlat} className={`hover:bg-slate-50 ${u.isOver ? "bg-rose-50/30" : ""}`}>
-                                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">{u.idAlat}</td>
+                                    <td className="py-2.5 px-3 font-mono font-bold text-slate-800">
+                                      {onSelectUnit ? (
+                                        <button
+                                          type="button"
+                                          onClick={(e) => {
+                                            e.stopPropagation();
+                                            onSelectUnit(u.idAlat);
+                                          }}
+                                          className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-md bg-blue-50 hover:bg-blue-100 text-blue-700 hover:text-blue-900 border border-blue-200 transition-all font-mono font-bold cursor-pointer group shadow-2xs"
+                                          title={`Klik untuk melihat detail Fuel Burn per tanggal (H-1) unit ${u.idAlat}`}
+                                        >
+                                          <span>{u.idAlat}</span>
+                                          <CalendarDays className="w-3.5 h-3.5 text-[#4682B4] group-hover:scale-110 transition-transform" />
+                                        </button>
+                                      ) : (
+                                        u.idAlat
+                                      )}
+                                    </td>
                                     <td className="py-2.5 px-3 text-slate-500">{u.typeAlat}</td>
                                     <td className="py-2.5 px-3 text-right font-mono">{u.totalHours.toLocaleString("id-ID")} J</td>
                                     <td className="py-2.5 px-3 text-right font-mono">{u.totalVolume.toLocaleString("id-ID")} L</td>
