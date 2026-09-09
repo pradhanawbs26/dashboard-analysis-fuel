@@ -21,7 +21,6 @@ interface UnitSelectorDropdownProps {
   units: UnitItem[];
   selectedUnitIds: string[];
   onChangeSelectedUnitIds: (ids: string[]) => void;
-  onUnitClick: (idAlat: string) => void;
   selectedEgy: string;
 }
 
@@ -29,7 +28,6 @@ export default function UnitSelectorDropdown({
   units,
   selectedUnitIds,
   onChangeSelectedUnitIds,
-  onUnitClick,
   selectedEgy
 }: UnitSelectorDropdownProps) {
   const [isOpen, setIsOpen] = useState(false);
@@ -216,23 +214,6 @@ export default function UnitSelectorDropdown({
                         )}
                       </div>
                     </label>
-
-                    {/* Quick Button to open 2-row Daily Fuel Burn Table */}
-                    <button
-                      type="button"
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        setIsOpen(false);
-                        onUnitClick(u.idAlat);
-                      }}
-                      className="shrink-0 p-1.5 rounded-lg text-slate-400 hover:text-blue-700 hover:bg-blue-100 transition cursor-pointer flex items-center gap-1"
-                      title={`Klik untuk melihat tabel Fuel Burn harian unit ${u.idAlat}`}
-                    >
-                      <CalendarDays className="w-3.5 h-3.5 text-[#4682B4]" />
-                      <span className="text-[10px] font-bold text-blue-700 underline hidden group-hover:inline">
-                        Lihat Fuel Burn
-                      </span>
-                    </button>
                   </div>
                 );
               })

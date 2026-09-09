@@ -198,13 +198,13 @@ export default function ParetoChart({ records, selectedEgy, selectedType = "SEMU
                         {/* Fuel Burn Bar */}
                         <div
                           onClick={() => onSelectUnit && onSelectUnit(unit.idAlat)}
-                          className={`w-full rounded-t transition-all duration-300 relative cursor-pointer active:scale-95 ${
+                          className={`w-full rounded-t transition-all duration-300 relative ${onSelectUnit ? "cursor-pointer active:scale-95" : ""} ${
                             isOutlier 
                               ? "bg-rose-500/90 group-hover:bg-rose-600/100 shadow-md shadow-rose-200/50" 
                               : "bg-[#4682B4] group-hover:bg-[#36648B] shadow-sm"
                           }`}
                           style={{ height: `${Math.max(barHeightPct, 2)}%` }}
-                          title={`Klik untuk melihat Fuel Burn harian unit ${unit.idAlat}`}
+                          title={`${unit.idAlat}: Fuel Burn ${unit.averageFuelBurn} L/Jam`}
                         >
                           {/* Bar Value Tooltip */}
                           <div className="absolute -top-7 left-1/2 -translate-x-1/2 bg-slate-800 text-white text-[10px] font-semibold px-2 py-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity whitespace-nowrap z-20 pointer-events-none">
@@ -214,14 +214,23 @@ export default function ParetoChart({ records, selectedEgy, selectedType = "SEMU
 
                         {/* Unit ID Label */}
                         <div className="absolute -bottom-6 w-full text-center truncate px-0.5">
-                          <button
-                            type="button"
-                            onClick={() => onSelectUnit && onSelectUnit(unit.idAlat)}
-                            className="text-[10px] font-bold text-slate-600 hover:text-blue-700 font-mono hover:underline cursor-pointer"
-                            title={`Klik untuk melihat Fuel Burn harian unit ${unit.idAlat}`}
-                          >
-                            {unit.idAlat.replace(/(EXC|DT|BULL|GRAD|LOAD)-/, "")}
-                          </button>
+                          {onSelectUnit ? (
+                            <button
+                              type="button"
+                              onClick={() => onSelectUnit(unit.idAlat)}
+                              className="text-[10px] font-bold text-slate-600 hover:text-blue-700 font-mono hover:underline cursor-pointer"
+                              title={`Unit ${unit.idAlat}`}
+                            >
+                              {unit.idAlat.replace(/(EXC|DT|BULL|GRAD|LOAD)-/, "")}
+                            </button>
+                          ) : (
+                            <span 
+                              className="text-[10px] font-bold text-slate-600 font-mono"
+                              title={unit.idAlat}
+                            >
+                              {unit.idAlat.replace(/(EXC|DT|BULL|GRAD|LOAD)-/, "")}
+                            </span>
+                          )}
                         </div>
 
                         {/* Detailed Full Hover Cards */}

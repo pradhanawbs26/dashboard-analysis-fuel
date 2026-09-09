@@ -295,31 +295,26 @@ export function cleanEgyName(name: string): string {
 
 /**
  * Standard Unit ID normalizer:
- * Converts older/historical fleet numbers (e.g. RS15001, FD15001, FL15001, DT15001, 15001)
- * to modern canonical equipment numbers (e.g. RS23001, FD23001, FL23001, DT23001, 23001).
+ * Officially converts all 15-series fleet numbers (e.g. FD15001-FD15044, RS15001, FL15001, DT15001, 15001)
+ * into their official 23-series equipment codes (FD23001-FD23044, RS23001, FL23001, DT23001, 23001).
  */
 export function getCanonicalUnitId(idAlat?: string): string {
   if (!idAlat) return "";
   const clean = idAlat.trim();
-  // Transform 15xxx into 23xxx (e.g. RS15001 -> RS23001, FD15004 -> FD23004, 15001 -> 23001)
-  return clean.replace(/^([A-Za-z]*[-_\s]*)15(\d+)$/i, "$123$2");
+  // Transform any 15-series equipment ID into the official 23-series code
+  // Handles FD15001 s/d FD15044 -> FD23001 s/d FD23044, DT15001 -> DT23001, 15001 -> 23001, etc.
+  return clean.replace(/^([A-Za-z]*[-_\s]*)15([-_\s]?\d+)$/i, "$123$2");
 }
 
 /**
- * Historical Unit ID resolver:
- * Converts current 23-series fleet numbers back to their Jan-Apr historical 15-series name
- * (e.g. RS23001 -> RS15001, FD23001 -> FD15001, 23001 -> 15001).
+ * Historical Unit ID resolver (Deprecated: All unit codes have officially transitioned to 23-series)
  */
 export function getHistoricalLegacyUnitId(idAlat?: string): string {
-  if (!idAlat) return "";
-  const clean = idAlat.trim();
-  return clean.replace(/^([A-Za-z]*[-_\s]*)23(\d+)$/i, "$115$2");
+  return getCanonicalUnitId(idAlat);
 }
 
 export function isHistoricalRenamedUnit(idAlat?: string): boolean {
-  if (!idAlat) return false;
-  const clean = idAlat.trim().toUpperCase();
-  return /^[A-Z]*[-_\s]*(15|23)\d+$/.test(clean);
+  return false;
 }
 
 export interface JulyEquipmentMaster {
@@ -328,32 +323,27 @@ export interface JulyEquipmentMaster {
 }
 
 // Canonical July Benchmark Master Map (Kolom C: Equipment, Kolom D: Egy, Kolom E: Type)
+// Official Fleet Registry: All 15-prefix equipment have been officially replaced by 23-prefix
 export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   // Bulldozers
   "DZ23001": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
-  "DZ15001": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
   "DZ-01": { egy: "BULLDOZER", type: "CATERPILAR D8T" },
 
   // Wheel Loaders
   "WL23001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
-  "WL15001": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
   "WL23002": { egy: "WHEEL LOADER", type: "CAT 980 NG" },
   "WL23003": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
   "WL23004": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
-  "WL15004": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
   "WA-500-01": { egy: "WHEEL LOADER", type: "KOMATSU WA 500" },
 
   // Reach Stackers
   "RS23001": { egy: "REACH STACKER", type: "KONECRANE 45T" },
-  "RS15001": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS23002": { egy: "REACH STACKER", type: "KONECRANE 45T" },
-  "RS15002": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS23003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
-  "RS15003": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "RS-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
   "KC-45T-01": { egy: "REACH STACKER", type: "KONECRANE 45T" },
 
-  // Flat Decks
+  // Flat Decks (FD23001 s/d FD23044 - Kode 23 Resmi Pengganti 15)
   "FD23001": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23002": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23003": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
@@ -377,29 +367,39 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "FD23021": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23022": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23023": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23024": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23025": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23026": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23027": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23028": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23029": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23030": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23031": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23032": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23033": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23034": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23035": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23036": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23037": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23038": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23039": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23040": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23041": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23042": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23043": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
+  "FD23044": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23209": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23213": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23214": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD23215": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15001": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15002": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15003": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15004": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15008": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15014": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15024": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15032": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
-  "FD15035": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
   "FD-01": { egy: "FLAT DECK", type: "HINO 500 (FM260JD)" },
 
   // Dump Trucks
   "DT23001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
-  "DT15001": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23002": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23003": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23004": { egy: "DUMP TRUCK", type: "HINO 500 (FM260JD)" },
   "DT23005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
-  "DT15005": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23006": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23007": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
   "DT23008": { egy: "DUMP TRUCK", type: "HINO 500 (FM280JD)" },
@@ -409,19 +409,16 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
 
   // Excavators
   "EX23001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
-  "EX15001": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
   "EX23203": { egy: "EXCAVATOR", type: "CAT 320 GC" },
   "EX-01": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
   "EX-02": { egy: "EXCAVATOR", type: "KOMATSU PC 210" },
 
   // Fuel Truck
   "FT23001": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
-  "FT15001": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
   "FT-01": { egy: "FUEL TRUCK", type: "HINO DUTRO 130HD" },
 
   // Water Trucks
   "WT23001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
-  "WT15001": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23002": { egy: "WATER TRUCK", type: "HINO 500 (FM280JD)" },
   "WT23003": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23004": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
@@ -431,7 +428,6 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   "WT23008": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23009": { egy: "WATER TRUCK", type: "HINO 500 (FM260JD)" },
   "WT23102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
-  "WT15102": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WT-01": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WT-02": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
   "WR23001": { egy: "WATER TRUCK", type: "DUTRO 136 HD" },
@@ -440,40 +436,32 @@ export const JULY_BENCHMARK_MASTER: Record<string, JulyEquipmentMaster> = {
   // Forklifts
   "FL23001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL23002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL15001": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
-  "FL15002": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL-01": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
   "FL-02": { egy: "FORKLIFT", type: "KOMATSU FD150E - 8" },
 
   // Motor Grader
   "GD23001": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
-  "GD15001": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-535-02": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
   "GD-01": { egy: "MOTOR GRADER", type: "KOMATSU GD 535" },
 
   // Crane Truck
   "CT23001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
-  "CT15001": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
   "CT-01": { egy: "CRANE TRUCK", type: "HINO 500 (FM280JD)" },
 
   // Tower Lamp
   "TL23002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
-  "TL15002": { egy: "TOWER LAMP", type: "TOWER LAMP" },
   "TL-01": { egy: "TOWER LAMP", type: "TOWER LAMP" },
 
   // Light Vehicles
   "LV23207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
-  "LV15207": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
   "LV-01": { egy: "LIGHT VEHICLE", type: "TOYOTA INNOVA" },
 
   // Compactor
   "CP23001": { egy: "COMPACTOR", type: "BOMAG BW211 / CATERPILAR CS 11 GC" },
-  "CP15001": { egy: "COMPACTOR", type: "BOMAG BW211 / CATERPILAR CS 11 GC" },
 
   // Gensets
   "GS23001": { egy: "GENSET", type: "GENSET CUMMINS 250KVA" },
-  "GS15001": { egy: "GENSET", type: "GENSET CUMMINS 250KVA" },
   "GS-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
   "GENSET-01": { egy: "GENSET", type: "GENSET EX PT MAS" },
 };
@@ -505,7 +493,8 @@ export function getJulyBenchmarkRegistry(): Record<string, { egy: string; type?:
           if (rawEgy && rawEgy !== "C" && rawEgy.length > 1) {
             const canonicalEgy = cleanEgyName(rawEgy);
             if (canonicalEgy && KNOWN_CANONICAL_EGY.includes(canonicalEgy)) {
-              cleaned[k.toUpperCase()] = { egy: canonicalEgy, type };
+              const canonKey = getCanonicalUnitId(k).toUpperCase();
+              cleaned[canonKey] = { egy: canonicalEgy, type };
             }
           }
         });
@@ -526,7 +515,7 @@ export function saveJulyBenchmarkRegistry(newMap: Record<string, string | { egy:
     const normalizedNew: Record<string, { egy: string; type?: string }> = {};
     Object.entries(newMap).forEach(([k, v]) => {
       if (!k || k.length < 2 || !isNaN(Number(k)) || k.includes(".") || k === "C" || k === "TOTAL") return;
-      const cleanKey = k.toUpperCase().trim();
+      const cleanKey = getCanonicalUnitId(k).toUpperCase().trim();
       const rawEgy = typeof v === "string" ? v : v?.egy;
       if (!rawEgy || rawEgy === "C" || rawEgy.length < 2) return;
       const canonicalEgy = cleanEgyName(rawEgy);
@@ -759,15 +748,18 @@ export function deriveEquipmentType(idAlat?: string, typeAlat?: string): string 
 
 // Dynamic helper to compute values for a raw row
 export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnomaly' | 'anomalyMessage' | 'egy'> & { egy?: string }): FuelRecord {
+  // Officially convert all 15-prefix equipment (e.g. FD15001-FD15044, DT15001) to official 23-prefix
+  const canonicalIdAlat = getCanonicalUnitId(raw.idAlat) || (raw.idAlat || "").trim();
+
   // Always prioritize canonical Egy derived from Equipment ID (Kolom Nomor Unit) & Plan Fuel Burn / August Benchmark
-  const resolvedEgy = deriveEgy(raw.idAlat, raw.egy || raw.typeAlat);
+  const resolvedEgy = deriveEgy(canonicalIdAlat, raw.egy || raw.typeAlat);
   const egy = resolvedEgy || (raw.egy && raw.egy.trim() ? cleanEgyName(raw.egy) : "LAINNYA");
   const selisihHm = Number((raw.hmSaatIni - raw.hmSebelum).toFixed(2));
   let fuelBurnRate = 0;
   let isAnomaly = false;
   let anomalyMessage = "";
 
-  const cleanId = (raw.idAlat || "").toUpperCase().replace(/[\s\-_]/g, "");
+  const cleanId = (canonicalIdAlat || "").toUpperCase().replace(/[\s\-_]/g, "");
   if (raw.hmSebelum < 0 || raw.hmSaatIni < 0) {
     isAnomaly = true;
     anomalyMessage = "Nilai HM tidak boleh negatif";
@@ -801,6 +793,7 @@ export function processRecord(raw: Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate'
 
   return {
     ...raw,
+    idAlat: canonicalIdAlat,
     egy,
     selisihHm,
     fuelBurnRate,
@@ -1206,10 +1199,6 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
   const generatedRecords: typeof RAW_SAMPLE_DATA = [];
 
   baseMonths.forEach((m, mIndex) => {
-    // Determine whether this month uses historical (15001) or current (23001) equipment numbering
-    // Months Jan - Apr (mIndex 0 to 3) used 15-series, May onwards (mIndex >= 4) uses 23-series
-    const isHistoricalMonth = mIndex < 4;
-
     // Generate dates throughout the month (e.g. 5th, 10th, 15th, 20th, 25th, 28th)
     const days = ["04", "08", "12", "16", "20", "24", "28"];
     days.forEach((day, dIdx) => {
@@ -1221,7 +1210,8 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
         const volVariance = ((fIdx + dIdx + mIndex) % 5) - 2;
         const finalVol = Math.max(10, fleet.vol + volVariance * 2);
 
-        const currentUnitId = isHistoricalMonth ? getHistoricalLegacyUnitId(fleet.idAlat) : fleet.idAlat;
+        // Always use the official 23-series equipment code (e.g. FD23001, DT23001)
+        const currentUnitId = fleet.idAlat;
 
         generatedRecords.push({
           id: `rec-${m.ym}-${day}-${currentUnitId}`,
@@ -1366,9 +1356,18 @@ export function mergeWithYearlyRecords(incomingRecords: FuelRecord[]): FuelRecor
     return INITIAL_FUEL_DATA;
   }
 
+  // Canonicalize incoming records so any 15xxx unit is always converted to 23xxx
+  const normalizedIncoming = incomingRecords.map(r => {
+    const canonicalId = getCanonicalUnitId(r.idAlat);
+    if (canonicalId && canonicalId !== r.idAlat) {
+      return { ...r, idAlat: canonicalId };
+    }
+    return r;
+  });
+
   // Find all distinct months (YYYY-MM) in incomingRecords
   const incomingMonths = new Set<string>();
-  incomingRecords.forEach(r => {
+  normalizedIncoming.forEach(r => {
     if (r.tanggal && r.tanggal.length >= 7) {
       incomingMonths.add(r.tanggal.substring(0, 7));
     }
@@ -1380,6 +1379,6 @@ export function mergeWithYearlyRecords(incomingRecords: FuelRecord[]): FuelRecor
     return !ym || !incomingMonths.has(ym);
   });
 
-  return [...baseOtherMonths, ...incomingRecords];
+  return [...baseOtherMonths, ...normalizedIncoming];
 }
 

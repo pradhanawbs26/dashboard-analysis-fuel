@@ -45,6 +45,7 @@ import {
   saveStoredUnitRegistry,
   saveStoredEgyPlans
 } from "../lib/egyPlanService";
+import { getCanonicalUnitId } from "../data/sampleData";
 
 interface PlanFuelBurnPageProps {
   egyPlans: EgyPlanMap;
@@ -262,7 +263,8 @@ export default function PlanFuelBurnPage({
 
     setDraftUnits(prev => {
       const updated = { ...prev };
-      unitCodes.forEach(code => {
+      unitCodes.forEach(rawCode => {
+        const code = getCanonicalUnitId(rawCode).toUpperCase();
         updated[code] = {
           idAlat: code,
           egy,
@@ -533,7 +535,8 @@ export default function PlanFuelBurnPage({
             }
 
             // Check for Unit
-            const unitId = (row["Nomor Unit (ID Alat)"] || row["Nomor Unit"] || row["ID Alat"] || row["Equipment"] || row["Unit"] || "").toString().trim().toUpperCase();
+            const rawUnitId = (row["Nomor Unit (ID Alat)"] || row["Nomor Unit"] || row["ID Alat"] || row["Equipment"] || row["Unit"] || "").toString().trim().toUpperCase();
+            const unitId = getCanonicalUnitId(rawUnitId).toUpperCase();
             const unitEgy = (row["Nama Egy"] || row["EGY"] || row["Jenis Egy"] || row["Type"] || egyKey || "SUPPORT").toString().trim().toUpperCase();
             const unitType = (row["Tipe / Model Alat"] || row["Type Alat"] || row["Model"] || "").toString().trim();
             const unitCustomPlan = parseFloat(row["Target Plan Fuel Burn (L/Jam)"] || row["Custom Plan"]);

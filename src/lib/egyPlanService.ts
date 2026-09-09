@@ -1,7 +1,7 @@
 import { doc, getDoc, setDoc, onSnapshot, Unsubscribe } from "firebase/firestore";
 import { db, handleFirestoreError, OperationType } from "./firebase";
-import { cleanEgyName, deriveEgy, JULY_BENCHMARK_MASTER } from "../data/sampleData";
-export { cleanEgyName, deriveEgy };
+import { cleanEgyName, deriveEgy, JULY_BENCHMARK_MASTER, getCanonicalUnitId } from "../data/sampleData";
+export { cleanEgyName, deriveEgy, getCanonicalUnitId };
 import { 
   EgyPlanMap, 
   UnitRegistryMap,
@@ -91,7 +91,16 @@ export function getStoredUnitRegistry(): UnitRegistryMap {
     if (raw !== null) {
       const parsed = JSON.parse(raw);
       if (parsed && typeof parsed === "object") {
-        return parsed as UnitRegistryMap;
+        const migrated: UnitRegistryMap = {};
+        Object.entries(parsed as UnitRegistryMap).forEach(([id, config]) => {
+          const canonId = getCanonicalUnitId(id).toUpperCase();
+          migrated[canonId] = {
+            ...config,
+            idAlat: canonId
+          };
+        });
+        const defaults = getDefaultUnitRegistry();
+        return { ...defaults, ...migrated };
       }
     }
   } catch (err) {
@@ -108,7 +117,15 @@ export function getStoredUnitRegistry(): UnitRegistryMap {
 export function saveStoredUnitRegistry(registry: UnitRegistryMap): void {
   if (typeof window === "undefined") return;
   try {
-    localStorage.setItem(LOCAL_STORAGE_UNIT_REGISTRY_KEY, JSON.stringify(registry));
+    const cleaned: UnitRegistryMap = {};
+    Object.entries(registry).forEach(([k, v]) => {
+      const canonId = getCanonicalUnitId(k).toUpperCase();
+      cleaned[canonId] = {
+        ...v,
+        idAlat: canonId
+      };
+    });
+    localStorage.setItem(LOCAL_STORAGE_UNIT_REGISTRY_KEY, JSON.stringify(cleaned));
   } catch (err) {
     console.warn("Error saving stored Unit Registry to localStorage:", err);
   }
@@ -118,15 +135,23 @@ export function saveStoredUnitRegistry(registry: UnitRegistryMap): void {
  * Save Unit Registry to Cloud Firestore
  */
 export async function saveUnitRegistryToFirestore(registry: UnitRegistryMap): Promise<void> {
+  const cleaned: UnitRegistryMap = {};
+  Object.entries(registry).forEach(([k, v]) => {
+    const canonId = getCanonicalUnitId(k).toUpperCase();
+    cleaned[canonId] = {
+      ...v,
+      idAlat: canonId
+    };
+  });
   const docRef = doc(db, FIRESTORE_PLAN_SETTINGS_COLLECTION, FIRESTORE_UNIT_REGISTRY_DOC_ID);
   const payload = {
     id: FIRESTORE_UNIT_REGISTRY_DOC_ID,
     updatedAt: new Date().toISOString(),
-    units: registry
+    units: cleaned
   };
   try {
     await setDoc(docRef, payload);
-    saveStoredUnitRegistry(registry);
+    saveStoredUnitRegistry(cleaned);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${FIRESTORE_PLAN_SETTINGS_COLLECTION}/${FIRESTORE_UNIT_REGISTRY_DOC_ID}`);
   }
@@ -146,8 +171,18 @@ export function subscribeToUnitRegistry(
       if (snap.exists()) {
         const data = snap.data();
         if (data && data.units && typeof data.units === "object") {
-          saveStoredUnitRegistry(data.units);
-          onData(data.units);
+          const migrated: UnitRegistryMap = {};
+          Object.entries(data.units as UnitRegistryMap).forEach(([id, config]) => {
+            const canonId = getCanonicalUnitId(id).toUpperCase();
+            migrated[canonId] = {
+              ...config,
+              idAlat: canonId
+            };
+          });
+          const defaults = getDefaultUnitRegistry();
+          const merged = { ...defaults, ...migrated };
+          saveStoredUnitRegistry(merged);
+          onData(merged);
           return;
         }
       }
@@ -276,8 +311,8 @@ export function resolvePlanForUnit(
   unitPlans?: Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>,
   egyPlans?: EgyPlanMap
 ): { planFuelBurn: number; source: "UNIT_SHEET" | "EGY_PLAN" | "DEFAULT" } {
-  const cleanId = (idAlat || "").trim().toUpperCase();
-  const canonicalEgy = cleanEgyName(egy || deriveEgy(idAlat, typeAlat)).toUpperCase();
+  const canonicalId = getCanonicalUnitId(idAlat || "").trim().toUpperCase();
+  const canonicalEgy = cleanEgyName(egy || deriveEgy(canonicalId, typeAlat)).toUpperCase();
   const activeEgyPlans = egyPlans || getStoredEgyPlans();
 
   // 1. Authoritative: check user-configured plan from "INPUT PLAN FUEL BURN"
@@ -286,8 +321,10 @@ export function resolvePlanForUnit(
   }
 
   // 2. Unit-level specific plan override if explicitly present
-  if (unitPlans && unitPlans[cleanId] && unitPlans[cleanId].planFuelBurn > 0) {
-    return { planFuelBurn: unitPlans[cleanId].planFuelBurn, source: "UNIT_SHEET" };
+  if (unitPlans) {
+    if (unitPlans[canonicalId] && unitPlans[canonicalId].planFuelBurn > 0) {
+      return { planFuelBurn: unitPlans[canonicalId].planFuelBurn, source: "UNIT_SHEET" };
+    }
   }
 
   // 3. Fallback in DEFAULT_EGY_PLANS
@@ -329,9 +366,9 @@ export function evaluateEgyPlanVsActual(
   }> = {};
 
   validRecords.forEach(r => {
-    const rawEgy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+    const id = r.idAlat ? getCanonicalUnitId(r.idAlat).trim().toUpperCase() : "UNKNOWN";
+    const rawEgy = r.egy || deriveEgy(id, r.typeAlat);
     const egy = cleanEgyName(rawEgy).toUpperCase() || "SUPPORT";
-    const id = r.idAlat ? r.idAlat.trim().toUpperCase() : "UNKNOWN";
 
     if (!egyMap[egy]) {
       egyMap[egy] = {
