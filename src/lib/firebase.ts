@@ -95,29 +95,62 @@ const MONTHLY_COLLECTION = 'monthly_reports';
 
 /**
  * Save or update a monthly report in Firestore backend
+ * Chunks records into subcollection batches if provided, preventing the 1MB Firestore document limit crash
  */
 export async function saveMonthlyReportToFirestore(report: MonthlyReportData): Promise<void> {
   const docId = report.id || `${report.year}_${report.bulan}`;
   const docRef = doc(db, MONTHLY_COLLECTION, docId);
-  
-  // Format clean payload conforming to schema
-  const payload: MonthlyReportData = {
-    id: docId,
-    bulan: report.bulan,
-    monthIndex: report.monthIndex,
-    year: report.year,
-    fileName: report.fileName || `Fuel_Report_${report.bulan}_${report.year}.xlsx`,
-    uploadedAt: report.uploadedAt || new Date().toISOString(),
-    totalVolume: Number(report.totalVolume) || 0,
-    totalHours: Number(report.totalHours) || 0,
-    recordCount: Number(report.recordCount) || 0,
-    avgBurnRate: Number(report.avgBurnRate) || (report.totalHours > 0 ? Number((report.totalVolume / report.totalHours).toFixed(2)) : 0),
-    typeSummaries: report.typeSummaries || [],
-    plans: report.plans || {},
-    records: report.records || []
-  };
+  const records = report.records || [];
+  const batchesCount = Math.ceil(records.length / BATCH_SIZE) || 0;
 
   try {
+    // 1. Write record batches to subcollection first
+    if (records.length > 0) {
+      for (let i = 0; i < batchesCount; i++) {
+        const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+        const batchDocRef = doc(db, MONTHLY_COLLECTION, docId, "batches", `batch_${i}`);
+        await setDoc(batchDocRef, {
+          batchIndex: i,
+          count: chunk.length,
+          records: chunk
+        });
+      }
+
+      // Clean up any extra old batches
+      try {
+        const batchesCol = collection(db, MONTHLY_COLLECTION, docId, "batches");
+        const existingBatchesSnap = await getDocs(batchesCol);
+        for (const d of existingBatchesSnap.docs) {
+          const batchIdx = parseInt(d.id.replace("batch_", ""), 10);
+          if (batchIdx >= batchesCount) {
+            await deleteDoc(d.ref);
+          }
+        }
+      } catch (cleanErr) {
+        console.warn("Monthly batches cleanup notice:", cleanErr);
+      }
+    }
+
+    // 2. Format clean payload conforming to schema without embedding huge raw record arrays in main doc
+    const payload: any = {
+      id: docId,
+      bulan: report.bulan,
+      monthIndex: report.monthIndex,
+      year: report.year,
+      fileName: report.fileName || `Fuel_Report_${report.bulan}_${report.year}.xlsx`,
+      uploadedAt: report.uploadedAt || new Date().toISOString(),
+      totalVolume: Number(report.totalVolume) || 0,
+      totalHours: Number(report.totalHours) || 0,
+      recordCount: Number(report.recordCount) || 0,
+      avgBurnRate: Number(report.avgBurnRate) || (report.totalHours > 0 ? Number((report.totalVolume / report.totalHours).toFixed(2)) : 0),
+      typeSummaries: report.typeSummaries || [],
+      unitSummaries: report.unitSummaries || [],
+      plans: report.plans || {},
+      batchesCount,
+      hasRecords: records.length > 0
+    };
+
+    // Keep records array empty or omitted in main document to guarantee document is well under 1MB
     await setDoc(docRef, payload);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${MONTHLY_COLLECTION}/${docId}`);
@@ -125,17 +158,42 @@ export async function saveMonthlyReportToFirestore(report: MonthlyReportData): P
 }
 
 /**
- * Fetch all monthly reports from Firestore backend
+ * Fetch all monthly reports from Firestore backend, including their batch records
  */
 export async function fetchAllMonthlyReports(): Promise<MonthlyReportData[]> {
   try {
     const colRef = collection(db, MONTHLY_COLLECTION);
     const snap = await getDocs(colRef);
     const results: MonthlyReportData[] = [];
-    snap.forEach((d) => {
-      results.push(d.data() as MonthlyReportData);
-    });
-    // Sort by monthIndex ascending
+
+    for (const d of snap.docs) {
+      const data = d.data() as any;
+      let reportRecords: FuelRecord[] = Array.isArray(data.records) ? data.records : [];
+
+      // If records were chunked in subcollection batches, load them
+      if (data.batchesCount && data.batchesCount > 0 && reportRecords.length === 0) {
+        try {
+          const batchesCol = collection(db, MONTHLY_COLLECTION, d.id, "batches");
+          const batchesSnap = await getDocs(batchesCol);
+          const sortedBatches = batchesSnap.docs
+            .map(bd => bd.data() as { batchIndex: number; records: FuelRecord[] })
+            .sort((a, b) => a.batchIndex - b.batchIndex);
+          for (const b of sortedBatches) {
+            if (Array.isArray(b.records)) {
+              reportRecords = reportRecords.concat(b.records);
+            }
+          }
+        } catch (bErr) {
+          console.warn(`Could not load batches for ${d.id}:`, bErr);
+        }
+      }
+
+      results.push({
+        ...data,
+        records: reportRecords
+      });
+    }
+
     return results.sort((a, b) => a.monthIndex - b.monthIndex);
   } catch (error) {
     console.error("fetchAllMonthlyReports error:", error);
@@ -144,10 +202,15 @@ export async function fetchAllMonthlyReports(): Promise<MonthlyReportData[]> {
 }
 
 /**
- * Delete a specific monthly report from Firestore
+ * Delete a specific monthly report and its subcollection batches from Firestore
  */
 export async function deleteMonthlyReport(docId: string): Promise<void> {
   try {
+    const batchesCol = collection(db, MONTHLY_COLLECTION, docId, "batches");
+    const batchesSnap = await getDocs(batchesCol);
+    for (const b of batchesSnap.docs) {
+      await deleteDoc(b.ref);
+    }
     const docRef = doc(db, MONTHLY_COLLECTION, docId);
     await deleteDoc(docRef);
   } catch (error) {
@@ -165,13 +228,40 @@ export function subscribeToMonthlyReports(
   const colRef = collection(db, MONTHLY_COLLECTION);
   return onSnapshot(
     colRef,
-    (snapshot) => {
-      const list: MonthlyReportData[] = [];
-      snapshot.forEach((d) => {
-        list.push(d.data() as MonthlyReportData);
-      });
-      list.sort((a, b) => a.monthIndex - b.monthIndex);
-      onData(list);
+    async (snapshot) => {
+      try {
+        const list: MonthlyReportData[] = [];
+        for (const d of snapshot.docs) {
+          const data = d.data() as any;
+          let reportRecords: FuelRecord[] = Array.isArray(data.records) ? data.records : [];
+
+          if (data.batchesCount && data.batchesCount > 0 && reportRecords.length === 0) {
+            try {
+              const batchesCol = collection(db, MONTHLY_COLLECTION, d.id, "batches");
+              const batchesSnap = await getDocs(batchesCol);
+              const sortedBatches = batchesSnap.docs
+                .map(bd => bd.data() as { batchIndex: number; records: FuelRecord[] })
+                .sort((a, b) => a.batchIndex - b.batchIndex);
+              for (const b of sortedBatches) {
+                if (Array.isArray(b.records)) {
+                  reportRecords = reportRecords.concat(b.records);
+                }
+              }
+            } catch (bErr) {
+              console.warn(`Could not load batches for monthly report ${d.id}:`, bErr);
+            }
+          }
+
+          list.push({
+            ...data,
+            records: reportRecords
+          });
+        }
+        list.sort((a, b) => a.monthIndex - b.monthIndex);
+        onData(list);
+      } catch (err) {
+        console.error("subscribeToMonthlyReports processing error:", err);
+      }
     },
     (error) => {
       console.error("Firestore onSnapshot error:", error);
@@ -196,6 +286,7 @@ export interface SaveActiveDatasetParams {
 
 /**
  * Save active fuel records and metadata directly into Cloud Firestore
+ * Note: Batches are written FIRST, and metadata document is written LAST to avoid race conditions with real-time listeners.
  */
 export async function saveActiveDatasetToFirestore({
   records,
@@ -227,10 +318,7 @@ export async function saveActiveDatasetToFirestore({
   };
 
   try {
-    // 1. Write the metadata document
-    await setDoc(metaDocRef, datasetMeta);
-
-    // 2. Write record batches
+    // 1. Write record batches FIRST so they exist when metadata triggers subscriber
     for (let i = 0; i < batchesCount; i++) {
       const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
       const batchDocRef = doc(db, ACTIVE_DATASET_COLLECTION, ACTIVE_DOC_ID, "batches", `batch_${i}`);
@@ -241,7 +329,7 @@ export async function saveActiveDatasetToFirestore({
       });
     }
 
-    // 3. Clean up any leftover higher-index batches from previously larger uploads
+    // 2. Clean up any leftover higher-index batches from previously larger uploads
     try {
       const batchesCol = collection(db, ACTIVE_DATASET_COLLECTION, ACTIVE_DOC_ID, "batches");
       const existingBatchesSnap = await getDocs(batchesCol);
@@ -254,6 +342,9 @@ export async function saveActiveDatasetToFirestore({
     } catch (cleanErr) {
       console.warn("Batch cleanup notice:", cleanErr);
     }
+
+    // 3. Write metadata document LAST to atomically trigger real-time listeners
+    await setDoc(metaDocRef, datasetMeta);
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${ACTIVE_DATASET_COLLECTION}/${ACTIVE_DOC_ID}`);
   }

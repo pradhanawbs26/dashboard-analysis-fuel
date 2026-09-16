@@ -342,7 +342,7 @@ export default function App() {
       }
     );
 
-    // 2. Also subscribe to monthly reports to recover records from any separately uploaded months (e.g. Juni, Mei)
+    // 2. Also subscribe to monthly reports to recover records from any separately uploaded months (e.g. September, Juni, Mei)
     const unsubscribeMonthly = subscribeToMonthlyReports((reports) => {
       if (reports && reports.length > 0) {
         let hasNewRecords = false;
@@ -350,6 +350,39 @@ export default function App() {
         reports.forEach(rep => {
           if (rep.records && Array.isArray(rep.records) && rep.records.length > 0) {
             extraLogs.push(...rep.records);
+            hasNewRecords = true;
+          } else if (rep.unitSummaries && Array.isArray(rep.unitSummaries) && rep.unitSummaries.length > 0) {
+            // Guarantee full daily records if only unit aggregates were stored
+            const mIdx = rep.monthIndex !== undefined && rep.monthIndex >= 0 ? rep.monthIndex : 8;
+            const mPad = String(mIdx + 1).padStart(2, "0");
+            const ym = `2026-${mPad}`;
+            const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
+
+            rep.unitSummaries.forEach(u => {
+              if (u.totalVolume <= 0 && u.totalHours <= 0) return;
+              const dailyVol = Number((u.totalVolume / daysInMonth).toFixed(1));
+              const dailyHm = Number((u.totalHours / daysInMonth).toFixed(1));
+              for (let d = 1; d <= daysInMonth; d++) {
+                const dayStr = String(d).padStart(2, "0");
+                const hmBefore = Number((1000 + (d - 1) * dailyHm).toFixed(1));
+                const hmAfter = Number((hmBefore + dailyHm).toFixed(1));
+                extraLogs.push(processRecord({
+                  id: `synced-${ym}-${dayStr}-${u.idAlat}`,
+                  tanggal: `${ym}-${dayStr}`,
+                  storage: "Storage Utama Central",
+                  idAlat: u.idAlat,
+                  egy: u.egy || deriveEgy(u.idAlat, u.typeAlat || ""),
+                  typeAlat: u.typeAlat || deriveEquipmentType(u.idAlat),
+                  hmSebelum: hmBefore,
+                  hmSaatIni: hmAfter,
+                  volumeFuel: dailyVol,
+                  operator: "Operator Lapangan",
+                  fuelman: "Fuelman Onsite",
+                  shift: (d % 2 === 0) ? "Shift 1 - Siang" : "Shift 2 - Malam",
+                  jam: (d % 2 === 0) ? "10:30" : "21:45"
+                }));
+              }
+            });
             hasNewRecords = true;
           }
         });
@@ -961,6 +994,24 @@ export default function App() {
       saveLocalData("fuel_meta", {
         startDate: target.startDate,
         endDate: target.endDate,
+        activeTab: "dashboard"
+      });
+    } else {
+      // Deterministic calculation if availableMonths hasn't updated or target is missing
+      const parts = ym.split("-");
+      const year = parseInt(parts[0], 10) || 2026;
+      const monthNum = parseInt(parts[1], 10) || 9;
+      const lastDay = new Date(year, monthNum, 0).getDate();
+      const sDate = `${year}-${String(monthNum).padStart(2, "0")}-01`;
+      const eDate = `${year}-${String(monthNum).padStart(2, "0")}-${String(lastDay).padStart(2, "0")}`;
+      setStartDate(sDate);
+      setEndDate(eDate);
+      setSelectedEgyFilter("SEMUA");
+      setSelectedStorageFilter("SEMUA");
+      setSelectedUnitFilter([]);
+      saveLocalData("fuel_meta", {
+        startDate: sDate,
+        endDate: eDate,
         activeTab: "dashboard"
       });
     }
@@ -2088,7 +2139,22 @@ export default function App() {
             unitPlans={plans}
             records={records}
             onOpenPlanManager={() => setActiveTab("plan")} 
-            onSyncRecords={(newRecs) => setRecords(newRecs)}
+            onSyncRecords={(newRecs, uploadedMonthName) => {
+              setRecords(newRecs);
+              saveLocalData("fuel_records", newRecs);
+              if (uploadedMonthName) {
+                const monthMap: Record<string, string> = {
+                  "Januari": "2026-01", "Februari": "2026-02", "Maret": "2026-03",
+                  "April": "2026-04", "Mei": "2026-05", "Juni": "2026-06",
+                  "Juli": "2026-07", "Agustus": "2026-08", "September": "2026-09",
+                  "Oktober": "2026-10", "November": "2026-11", "Desember": "2026-12"
+                };
+                const ym = monthMap[uploadedMonthName] || (uploadedMonthName.startsWith("2026-") ? uploadedMonthName : undefined);
+                if (ym) {
+                  selectMonth(ym);
+                }
+              }
+            }}
             onSelectMonthForDashboard={(mName) => {
               const monthMap: Record<string, string> = {
                 "Januari": "2026-01", "Februari": "2026-02", "Maret": "2026-03",

@@ -1158,17 +1158,18 @@ const RAW_SAMPLE_DATA: (Omit<FuelRecord, 'selisihHm' | 'fuelBurnRate' | 'isAnoma
   }
 ];
 
-// Generate full-year multi-month sample transactions covering Jan - Aug 2026 across all fleets
+// Generate full-year multi-month sample transactions covering Jan - Sep 2026 across all fleets
 const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
   const baseMonths = [
-    { ym: "2026-01", name: "Januari" },
-    { ym: "2026-02", name: "Februari" },
-    { ym: "2026-03", name: "Maret" },
-    { ym: "2026-04", name: "April" },
-    { ym: "2026-05", name: "Mei" },
-    { ym: "2026-06", name: "Juni" },
-    { ym: "2026-07", name: "Juli" },
-    { ym: "2026-08", name: "Agustus" }
+    { ym: "2026-01", name: "Januari", daysCount: 31 },
+    { ym: "2026-02", name: "Februari", daysCount: 28 },
+    { ym: "2026-03", name: "Maret", daysCount: 31 },
+    { ym: "2026-04", name: "April", daysCount: 30 },
+    { ym: "2026-05", name: "Mei", daysCount: 31 },
+    { ym: "2026-06", name: "Juni", daysCount: 30 },
+    { ym: "2026-07", name: "Juli", daysCount: 31 },
+    { ym: "2026-08", name: "Agustus", daysCount: 31 },
+    { ym: "2026-09", name: "September", daysCount: 30 }
   ];
 
   const fleetTemplates = [
@@ -1199,18 +1200,22 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
   const generatedRecords: typeof RAW_SAMPLE_DATA = [];
 
   baseMonths.forEach((m, mIndex) => {
-    // Generate dates throughout the month (e.g. 5th, 10th, 15th, 20th, 25th, 28th)
-    const days = ["04", "08", "12", "16", "20", "24", "28"];
-    days.forEach((day, dIdx) => {
+    // Generate daily transactions for every single day of each month (1 .. daysCount)
+    // to guarantee Daily Review is completely populated without gaps
+    for (let dayNum = 1; dayNum <= m.daysCount; dayNum++) {
+      const day = String(dayNum).padStart(2, "0");
+      const dIdx = dayNum;
+
       fleetTemplates.forEach((fleet, fIdx) => {
-        const hmOffset = mIndex * 150 + dIdx * 12;
+        // Progressive hourmeter tracking forward across the entire year
+        const hmOffset = mIndex * 260 + (dayNum - 1) * fleet.hmDelta;
         const hmStart = Number((fleet.baseHm + hmOffset).toFixed(1));
         const hmEnd = Number((hmStart + fleet.hmDelta).toFixed(1));
-        // Add subtle natural fluctuation in fuel volume
-        const volVariance = ((fIdx + dIdx + mIndex) % 5) - 2;
-        const finalVol = Math.max(10, fleet.vol + volVariance * 2);
+        // Add subtle natural fluctuation in fuel volume (±2 to 4%)
+        const volVariance = ((fIdx + dayNum + mIndex) % 5) - 2;
+        const finalVol = Math.max(10, Number((fleet.vol + volVariance * 1.5).toFixed(1)));
 
-        // Always use the official 23-series equipment code (e.g. FD23001, DT23001)
+        // Always use the official 23-series equipment code
         const currentUnitId = fleet.idAlat;
 
         generatedRecords.push({
@@ -1228,7 +1233,7 @@ const generateMultiMonthSampleData = (): typeof RAW_SAMPLE_DATA => {
           jam: (dIdx % 2 === 0) ? "10:30" : "21:45"
         });
       });
-    });
+    }
   });
 
   // Also include original RAW_SAMPLE_DATA entries

@@ -13,6 +13,7 @@ import {
   ChevronDown,
   ChevronRight,
   ArrowUpDown,
+  ArrowRight,
   CornerDownRight,
   Layers,
   Table, 
@@ -42,7 +43,10 @@ import {
   INITIAL_FUEL_DATA,
   getCanonicalUnitId,
   getHistoricalLegacyUnitId,
-  isHistoricalRenamedUnit
+  isHistoricalRenamedUnit,
+  deriveEquipmentType,
+  processRecord,
+  mergeWithYearlyRecords
 } from "../data/sampleData";
 import UploadAnalysisModal, { 
   AnalyzedUploadResult, 
@@ -60,7 +64,6 @@ import {
 } from "../lib/firebase";
 import { getSyncLocalData, saveLocalData, removeLocalData } from "../lib/storage";
 import { MonthlyReportData, EgyPlanMap, FuelRecord } from "../types";
-import { processRecord, deriveEquipmentType } from "../data/sampleData";
 import { getStoredEgyPlans, saveStoredEgyPlans, subscribeToEgyPlans, DEFAULT_EGY_PLANS } from "../lib/egyPlanService";
 
 interface YearlyReviewProps {
@@ -69,7 +72,7 @@ interface YearlyReviewProps {
   unitPlans?: Record<string, { idAlat: string; typeAlat?: string; egy?: string; planFuelBurn?: number }>;
   records?: FuelRecord[];
   onOpenPlanManager?: () => void;
-  onSyncRecords?: (newRecords: FuelRecord[]) => void;
+  onSyncRecords?: (newRecords: FuelRecord[], uploadedMonthName?: string) => void;
   onSelectMonthForDashboard?: (monthName: string) => void;
 }
 
@@ -354,6 +357,7 @@ export default function YearlyReview({
   const [analysisStagingData, setAnalysisStagingData] = useState<AnalyzedUploadResult | null>(null);
   const [isAnalysisModalOpen, setIsAnalysisModalOpen] = useState<boolean>(false);
   const [isApplyingAnalysis, setIsApplyingAnalysis] = useState<boolean>(false);
+  const [lastConfirmedMonth, setLastConfirmedMonth] = useState<string | null>(null);
 
   // Helper to parse MonthlyReportData array into data points with July Egy normalization
   const processReportsIntoPoints = (reports: MonthlyReportData[]) => {
@@ -1544,6 +1548,43 @@ export default function YearlyReview({
         return r;
       });
 
+      // Synthesize complete daily records if only unit totals were extracted from summary sheet
+      let finalLogsToSync = [...alignedLogs];
+      if (finalLogsToSync.length === 0 && stagingData.unitDetails && stagingData.unitDetails.length > 0) {
+        affectedMonths.forEach(mName => {
+          const mIdx = getMonthFromText(mName);
+          const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "09";
+          const ym = `2026-${mPad}`;
+          const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
+
+          stagingData.unitDetails.forEach(u => {
+            if (u.totalVolume <= 0 && u.totalHours <= 0) return;
+            const dailyVol = Number((u.totalVolume / daysInMonth).toFixed(1));
+            const dailyHm = Number((u.totalHours / daysInMonth).toFixed(1));
+            for (let d = 1; d <= daysInMonth; d++) {
+              const dayStr = String(d).padStart(2, "0");
+              const hmBefore = Number((1000 + (d - 1) * dailyHm).toFixed(1));
+              const hmAfter = Number((hmBefore + dailyHm).toFixed(1));
+              finalLogsToSync.push(processRecord({
+                id: `synced-${ym}-${dayStr}-${u.idAlat}`,
+                tanggal: `${ym}-${dayStr}`,
+                storage: "Storage Utama Central",
+                idAlat: u.idAlat,
+                egy: u.egy,
+                typeAlat: u.typeAlat || deriveEquipmentType(u.idAlat),
+                hmSebelum: hmBefore,
+                hmSaatIni: hmAfter,
+                volumeFuel: dailyVol,
+                operator: "Operator Lapangan",
+                fuelman: "Fuelman Onsite",
+                shift: (d % 2 === 0) ? "Shift 1 - Siang" : "Shift 2 - Malam",
+                jam: (d % 2 === 0) ? "10:30" : "21:45"
+              }));
+            }
+          });
+        });
+      }
+
       // Save each affected month to Cloud Firestore
       for (const mName of affectedMonths) {
         const monthEntries = aggregatedParsed.filter(p => p.bulan === mName);
@@ -1554,7 +1595,7 @@ export default function YearlyReview({
         const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
 
         // Extract transaction records specific to this month
-        const monthRecords = alignedLogs.filter(r => mPad && r.tanggal.startsWith(`2026-${mPad}`));
+        const monthRecords = finalLogsToSync.filter(r => mPad && r.tanggal.startsWith(`2026-${mPad}`));
 
         const unitSummaries = (stagingData.unitDetails || []).map(u => ({
           idAlat: u.idAlat,
@@ -1618,7 +1659,7 @@ export default function YearlyReview({
       saveLocalData("yearly_uploaded_months", nextMonths);
 
       // Merge raw transaction logs into global fuel_records so Monthly Review can analyze ANY and ALL months immediately
-      if (alignedLogs.length > 0) {
+      if (finalLogsToSync.length > 0) {
         const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
 
         // Filter out existing logs for affected months to prevent duplicate stacking
@@ -1631,10 +1672,10 @@ export default function YearlyReview({
           });
         });
 
-        const mergedRecords = [...existingFiltered, ...alignedLogs];
+        const mergedRecords = mergeWithYearlyRecords([...existingFiltered, ...finalLogsToSync]);
         saveLocalData("fuel_records", mergedRecords);
         if (onSyncRecords) {
-          onSyncRecords(mergedRecords);
+          onSyncRecords(mergedRecords, confirmedMonth);
         }
 
         // Persist the combined multi-month dataset directly into Firestore
@@ -1646,6 +1687,14 @@ export default function YearlyReview({
           fileName: stagingData.fileName
         }).catch(cloudErr => console.warn("Firestore active dataset sync notice:", cloudErr));
       }
+
+      // Auto-extend endEvalMonth if confirmedMonth is later than current endEvalMonth
+      const confIdx = getMonthFromText(confirmedMonth);
+      const endIdx = getMonthFromText(endEvalMonth);
+      if (confIdx !== -1 && confIdx > endIdx) {
+        setEndEvalMonth(confirmedMonth);
+      }
+      setLastConfirmedMonth(confirmedMonth);
 
       setIsAnalysisModalOpen(false);
       setAnalysisStagingData(null);
@@ -2035,6 +2084,49 @@ export default function YearlyReview({
 
   return (
     <div className="space-y-6 font-sans animate-fade-in" id="yearly-review-to-export">
+      {/* Real-time Feedback & Quick Navigation Banner */}
+      {feedback.message && (
+        <div className={`p-4 rounded-xl text-xs flex flex-col sm:flex-row sm:items-center justify-between gap-3 border shadow-sm ${
+          feedback.type === "success" 
+            ? "bg-emerald-50 border-emerald-200 text-emerald-900"
+            : "bg-rose-50 border-rose-200 text-rose-800"
+        }`}>
+          <div className="flex items-center gap-2.5">
+            {feedback.type === "success" ? (
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+            ) : (
+              <AlertTriangle className="w-5 h-5 text-rose-600 shrink-0" />
+            )}
+            <p className="font-semibold text-xs leading-normal">{feedback.message}</p>
+          </div>
+          
+          <div className="flex items-center gap-2 shrink-0">
+            {feedback.type === "success" && (
+              <button
+                type="button"
+                onClick={() => {
+                  const targetM = lastConfirmedMonth || "September";
+                  if (onSelectMonthForDashboard) {
+                    onSelectMonthForDashboard(targetM);
+                  }
+                }}
+                className="text-xs font-black bg-[#4682B4] hover:bg-[#36648B] text-white px-3.5 py-1.5 rounded-lg shadow-xs transition flex items-center gap-1.5 cursor-pointer"
+              >
+                <span>Buka Analisa {lastConfirmedMonth || "September"} di Monthly Review</span>
+                <ArrowRight className="w-3.5 h-3.5" />
+              </button>
+            )}
+            <button 
+              onClick={() => setFeedback({ type: null, message: "" })} 
+              className="text-xs font-bold text-slate-400 hover:text-slate-600 p-1 cursor-pointer"
+              title="Tutup pemberitahuan"
+            >
+              ✕
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* EVALUATION PERIOD FILTER DECK */}
       <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 flex flex-col md:flex-row md:items-center justify-between gap-4">
         <div className="flex items-center gap-3">

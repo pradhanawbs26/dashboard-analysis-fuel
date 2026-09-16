@@ -77,9 +77,9 @@ function generateDatesBetween(start: string, end: string): string[] {
     return [start];
   }
 
-  // Safety limit to max 90 days to avoid performance strain
+  // Support up to full year (366 days) so broad views are never truncated
   let count = 0;
-  while (cur <= stop && count < 120) {
+  while (cur <= stop && count < 366) {
     const y = cur.getUTCFullYear();
     const m = String(cur.getUTCMonth() + 1).padStart(2, "0");
     const d = String(cur.getUTCDate()).padStart(2, "0");
@@ -172,8 +172,27 @@ export default function DailyReviewView({
   const [startDate, setStartDate] = useState<string>(() => initialStartDate || minMaxDates.min);
   const [endDate, setEndDate] = useState<string>(() => initialEndDate || minMaxDates.max);
 
-  // Accounting Mode: H-1 (Full-to-Full) vs H (Log Date)
-  const [useHMinusOne, setUseHMinusOne] = useState<boolean>(true);
+  // Sync date when parent props change
+  React.useEffect(() => {
+    if (initialStartDate) setStartDate(initialStartDate);
+    if (initialEndDate) setEndDate(initialEndDate);
+  }, [initialStartDate, initialEndDate]);
+
+  // Accounting Mode: H-1 (Full-to-Full) vs H (Log Date) - Default to H (false) for direct 1-to-1 operational matching
+  const [useHMinusOne, setUseHMinusOne] = useState<boolean>(false);
+
+  // Quick Month Presets (Januari s/d September 2026)
+  const monthPresets = [
+    { label: "Jan", fullLabel: "Januari 2026", start: "2026-01-01", end: "2026-01-31" },
+    { label: "Feb", fullLabel: "Februari 2026", start: "2026-02-01", end: "2026-02-28" },
+    { label: "Mar", fullLabel: "Maret 2026", start: "2026-03-01", end: "2026-03-31" },
+    { label: "Apr", fullLabel: "April 2026", start: "2026-04-01", end: "2026-04-30" },
+    { label: "Mei", fullLabel: "Mei 2026", start: "2026-05-01", end: "2026-05-31" },
+    { label: "Jun", fullLabel: "Juni 2026", start: "2026-06-01", end: "2026-06-30" },
+    { label: "Jul", fullLabel: "Juli 2026", start: "2026-07-01", end: "2026-07-31" },
+    { label: "Agt", fullLabel: "Agustus 2026", start: "2026-08-01", end: "2026-08-31" },
+    { label: "Sep", fullLabel: "September 2026", start: "2026-09-01", end: "2026-09-30" },
+  ];
 
   // Active view table mode: ALL, FUEL_BURN, VOLUME, HOURMETER
   const [activeViewTable, setActiveViewTable] = useState<"ALL" | "FUEL_BURN" | "VOLUME" | "HOURMETER">("ALL");
@@ -294,10 +313,15 @@ export default function DailyReviewView({
 
       dailyMap.forEach(cell => {
         if (cell.selisihHm > 0) {
-          cell.fuelBurn = Number((cell.volumeFuel / cell.selisihHm).toFixed(2));
-          if (planRes.planFuelBurn > 0 && cell.fuelBurn > planRes.planFuelBurn) {
-            cell.isOverPlan = true;
-            overDays++;
+          if (cell.volumeFuel > 0) {
+            cell.fuelBurn = Number((cell.volumeFuel / cell.selisihHm).toFixed(2));
+            if (planRes.planFuelBurn > 0 && cell.fuelBurn > planRes.planFuelBurn) {
+              cell.isOverPlan = true;
+              overDays++;
+            }
+          } else {
+            // Unit beroperasi (ada HM tercatat), tetapi tidak ada pengisian solar pada tanggal bersangkutan
+            cell.fuelBurn = 0;
           }
         }
         if (cell.isHmZero || cell.isHmMundur) {
@@ -481,6 +505,50 @@ export default function DailyReviewView({
 
       {/* TOP CONTROL PANEL & FILTER BAR */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
+
+        {/* PILIHAN CEPAT BULAN (JAN - SEP 2026) */}
+        <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-slate-100">
+          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider mr-1.5 flex items-center gap-1">
+            <Calendar className="w-3.5 h-3.5 text-[#4682B4]" />
+            <span>Pilih Cepat Bulan:</span>
+          </span>
+          {monthPresets.map(mp => {
+            const isActive = startDate === mp.start && endDate === mp.end;
+            return (
+              <button
+                key={mp.start}
+                type="button"
+                onClick={() => {
+                  setStartDate(mp.start);
+                  setEndDate(mp.end);
+                }}
+                className={`text-xs px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+                  isActive
+                    ? "bg-[#4682B4] text-white shadow-xs"
+                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
+                }`}
+                title={`Tampilkan seluruh data ${mp.fullLabel}`}
+              >
+                {mp.fullLabel}
+              </button>
+            );
+          })}
+          <button
+            type="button"
+            onClick={() => {
+              setStartDate(minMaxDates.min);
+              setEndDate(minMaxDates.max);
+            }}
+            className={`text-xs px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
+              startDate === minMaxDates.min && endDate === minMaxDates.max
+                ? "bg-slate-800 text-white shadow-xs"
+                : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
+            }`}
+            title="Tampilkan seluruh rentang data yang tersedia di sistem"
+          >
+            Semua Periode
+          </button>
+        </div>
         
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           
@@ -789,7 +857,11 @@ export default function DailyReviewView({
                               }
                             >
                               {hasBurn ? (
-                                cell.fuelBurn?.toFixed(2)
+                                cell.fuelBurn! > 0 ? (
+                                  cell.fuelBurn?.toFixed(2)
+                                ) : (
+                                  <span className="text-slate-400 font-medium" title="Beroperasi tanpa pengisian solar hari ini">0.00</span>
+                                )
                               ) : hasAnomaly ? (
                                 <span className="text-[10px] text-amber-700 font-black">HM ⚠️</span>
                               ) : (
