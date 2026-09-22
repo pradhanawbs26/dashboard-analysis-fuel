@@ -33,6 +33,7 @@ import { jsPDF } from "jspdf";
 import html2canvas from "html2canvas-pro";
 import { 
   normalizeDateToYMD, 
+  formatExcelTime,
   deriveEgy, 
   cleanEgyName, 
   saveJulyBenchmarkRegistry, 
@@ -890,7 +891,7 @@ export default function YearlyReview({
     reader.onload = async (event) => {
       try {
         const dataArr = new Uint8Array(event.target?.result as ArrayBuffer);
-        const workbook = XLSX.read(dataArr, { type: "array" });
+        const workbook = XLSX.read(dataArr, { type: "array", cellDates: true });
 
         if (workbook.SheetNames.length === 0) {
           throw new Error("Buku kerja Excel tidak didukung atau kosong.");
@@ -1155,6 +1156,7 @@ export default function YearlyReview({
             const sheetAggregates: Record<string, { totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
             const unitAggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
 
+            let lastSeenDate = "";
             for (let r = startIdx; r < rawRows.length; r++) {
               const row = rawRows[r];
               if (!row || row.length < 2) continue;
@@ -1229,10 +1231,18 @@ export default function YearlyReview({
                 isAnomalyRow = true;
               }
 
-              // Scrape exact date from date cell
+              // Scrape exact date from date cell or jam cell
               let normalizedYmd = "";
               if (colMap.tanggal !== -1 && colMap.tanggal < row.length && row[colMap.tanggal] !== undefined && row[colMap.tanggal] !== null) {
                 normalizedYmd = normalizeDateToYMD(row[colMap.tanggal]);
+              }
+              if (!normalizedYmd && colMap.jam !== -1 && colMap.jam < row.length && row[colMap.jam] !== undefined && row[colMap.jam] !== null) {
+                normalizedYmd = normalizeDateToYMD(row[colMap.jam]);
+              }
+              if (normalizedYmd) {
+                lastSeenDate = normalizedYmd;
+              } else if (lastSeenDate) {
+                normalizedYmd = lastSeenDate;
               }
 
               let rowMonthName = selectedMonthForUpload || monthIdentifier;
@@ -1259,7 +1269,8 @@ export default function YearlyReview({
               const rowOperator = colMap.operator !== -1 && colMap.operator < row.length && row[colMap.operator] ? String(row[colMap.operator]).trim() : "Operator Lapangan";
               const rowFuelman = colMap.fuelman !== -1 && colMap.fuelman < row.length && row[colMap.fuelman] ? String(row[colMap.fuelman]).trim() : "Fuelman Onsite";
               const rowShift = colMap.shift !== -1 && colMap.shift < row.length && row[colMap.shift] ? String(row[colMap.shift]).trim() : "Shift 1 - Siang";
-              const rowJam = colMap.jam !== -1 && colMap.jam < row.length && row[colMap.jam] ? String(row[colMap.jam]).trim() : "12:00";
+              const rawJam = colMap.jam !== -1 && colMap.jam < row.length && row[colMap.jam] !== undefined && row[colMap.jam] !== null ? row[colMap.jam] : "12:00";
+              const rowJam = formatExcelTime(rawJam);
 
               const processedLogItem = processRecord({
                 id: `yr-rec-${sheetName}-${r}-${Date.now()}-${Math.random().toString(36).substr(2, 4)}`,
@@ -1534,14 +1545,30 @@ export default function YearlyReview({
         ? (rawPayload.rawFuelRecords as FuelRecord[])
         : [];
 
-      // If not a multi-month file, ensure all logs match the confirmed month
-      const alignedLogs = rawLogs.map(r => {
+      // If not a multi-month file, ensure all logs match the confirmed month and are properly distributed across days
+      const targetMonthIndex = getMonthFromText(confirmedMonth);
+      const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "08";
+      const daysInTargetMonth = new Date(2026, targetMonthIndex + 1, 0).getDate() || 30;
+
+      // Check if rawLogs has dates spread across days or if all are stuck on a single date (e.g. all on 15th)
+      const distinctDaysInRaw = new Set(rawLogs.map(r => r.tanggal).filter(Boolean));
+      const isSingleDayOrInvalid = distinctDaysInRaw.size <= 1;
+
+      const alignedLogs = rawLogs.map((r, rIdx) => {
         if (!isMultiMonthFile) {
-          const targetMonthIndex = getMonthFromText(confirmedMonth);
-          const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "08";
+          if (isSingleDayOrInvalid) {
+            // Distribute chronologically across the month so daily review is fully populated
+            const dayNum = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
+            const dayPart = String(dayNum).padStart(2, "0");
+            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
+          }
           if (!r.tanggal.includes(`-${targetMonthPad}-`)) {
             const parts = r.tanggal.split("-");
-            const dayPart = parts.length === 3 ? parts[2] : "15";
+            let dayPart = parts.length === 3 ? parts[2] : "";
+            if (!dayPart || isNaN(parseInt(dayPart, 10)) || parseInt(dayPart, 10) < 1 || parseInt(dayPart, 10) > daysInTargetMonth) {
+              const dayNum = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
+              dayPart = String(dayNum).padStart(2, "0");
+            }
             return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
           }
         }

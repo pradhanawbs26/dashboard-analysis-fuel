@@ -33,7 +33,7 @@ import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 import { FuelRecord, EgyPlanMap, UnitRegistryMap } from "./types";
-import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords, getCanonicalUnitId } from "./data/sampleData";
+import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, formatExcelTime, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords, getCanonicalUnitId } from "./data/sampleData";
 import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
@@ -349,7 +349,29 @@ export default function App() {
         const extraLogs: FuelRecord[] = [];
         reports.forEach(rep => {
           if (rep.records && Array.isArray(rep.records) && rep.records.length > 0) {
-            extraLogs.push(...rep.records);
+            // Check if incoming records have collapsed onto a single date (e.g. 2026-xx-15)
+            const uniqueDates = new Set(rep.records.map(r => r.tanggal).filter(Boolean));
+            let sanitizedRecords = rep.records;
+            if (uniqueDates.size <= 1) {
+              const mIdx = rep.monthIndex !== undefined && rep.monthIndex >= 0 ? rep.monthIndex : 0;
+              const mPad = String(mIdx + 1).padStart(2, "0");
+              const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
+              sanitizedRecords = rep.records.map((r, rIdx) => {
+                const dayNum = Math.min(daysInMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rep.records!.length)) * daysInMonth) + 1));
+                const dayStr = String(dayNum).padStart(2, "0");
+                return {
+                  ...r,
+                  tanggal: `2026-${mPad}-${dayStr}`,
+                  jam: formatExcelTime(r.jam)
+                };
+              });
+            } else {
+              sanitizedRecords = rep.records.map(r => ({
+                ...r,
+                jam: formatExcelTime(r.jam)
+              }));
+            }
+            extraLogs.push(...sanitizedRecords);
             hasNewRecords = true;
           } else if (rep.unitSummaries && Array.isArray(rep.unitSummaries) && rep.unitSummaries.length > 0) {
             // Guarantee full daily records if only unit aggregates were stored
@@ -389,12 +411,44 @@ export default function App() {
 
         if (hasNewRecords && extraLogs.length > 0) {
           setRecords(prev => {
-            const extraMonths = new Set(extraLogs.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
+            // Calculate day count per month in prev to avoid overwriting rich daily records with worse single-day data
+            const monthDayCountsPrev: Record<string, Set<string>> = {};
+            prev.forEach(r => {
+              const ym = r.tanggal?.substring(0, 7);
+              if (ym) {
+                if (!monthDayCountsPrev[ym]) monthDayCountsPrev[ym] = new Set();
+                monthDayCountsPrev[ym].add(r.tanggal);
+              }
+            });
+
+            const extraMonthsToReplace = new Set<string>();
+            const monthDayCountsExtra: Record<string, Set<string>> = {};
+            extraLogs.forEach(r => {
+              const ym = r.tanggal?.substring(0, 7);
+              if (ym) {
+                if (!monthDayCountsExtra[ym]) monthDayCountsExtra[ym] = new Set();
+                monthDayCountsExtra[ym].add(r.tanggal);
+              }
+            });
+
+            Object.keys(monthDayCountsExtra).forEach(ym => {
+              const prevDays = monthDayCountsPrev[ym]?.size || 0;
+              const extraDays = monthDayCountsExtra[ym]?.size || 0;
+              // If incoming has >= 10 days of records or prev had fewer days, replace
+              if (extraDays >= 10 || extraDays >= prevDays || prevDays === 0) {
+                extraMonthsToReplace.add(ym);
+              }
+            });
+
             const filteredPrev = prev.filter(r => {
               const ym = r.tanggal?.substring(0, 7);
-              return !ym || !extraMonths.has(ym);
+              return !ym || !extraMonthsToReplace.has(ym);
             });
-            const merged = mergeWithYearlyRecords([...filteredPrev, ...extraLogs]);
+            const validIncoming = extraLogs.filter(r => {
+              const ym = r.tanggal?.substring(0, 7);
+              return ym && extraMonthsToReplace.has(ym);
+            });
+            const merged = mergeWithYearlyRecords([...filteredPrev, ...validIncoming]);
             saveLocalData("fuel_records", merged);
             return merged;
           });

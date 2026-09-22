@@ -16,6 +16,40 @@ const MONTH_NAMES_DICT: Record<string, string> = {
   des: "12", desember: "12", dec: "12", december: "12"
 };
 
+  // Helper to reliably convert any Excel time (fraction of day, serial date+time, or HH:mm) into clean HH:mm
+export function formatExcelTime(cellVal: any): string {
+  if (cellVal === undefined || cellVal === null) return "12:00";
+  const str = String(cellVal).trim();
+  if (!str) return "12:00";
+
+  // If already standard time format like "14:30" or "09:15:00"
+  const timeRegex = /^([0-1]?[0-9]|2[0-3]):([0-5][0-9])(:[0-5][0-9])?$/;
+  if (timeRegex.test(str)) {
+    const parts = str.split(":");
+    return `${parts[0].padStart(2, "0")}:${parts[1].padStart(2, "0")}`;
+  }
+
+  // Parse numeric values (Excel serial timestamps, e.g. 46023.6234 or 0.6234)
+  const num = typeof cellVal === "number" ? cellVal : parseFloat(str);
+  if (!isNaN(num)) {
+    // If it is a whole number representing hours (e.g. 14 -> 14:00)
+    if (num >= 0 && num < 24 && Math.floor(num) === num && num > 0) {
+      return `${String(Math.floor(num)).padStart(2, "0")}:00`;
+    }
+    // Take fraction part of the day
+    let frac = num - Math.floor(num);
+    if (frac === 0 && num > 0 && num < 1) frac = num;
+    if (frac > 0) {
+      const totalMinutes = Math.round(frac * 24 * 60);
+      const hours = Math.floor(totalMinutes / 60) % 24;
+      const mins = totalMinutes % 60;
+      return `${String(hours).padStart(2, "0")}:${String(mins).padStart(2, "0")}`;
+    }
+  }
+
+  return str.length <= 8 ? str : "12:00";
+}
+
 // Helper to reliably convert any Excel/CSV date format into correct YYYY-MM-DD string
 export function normalizeDateToYMD(cellVal: any): string {
   if (cellVal === undefined || cellVal === null) return "";
@@ -32,10 +66,11 @@ export function normalizeDateToYMD(cellVal: any): string {
     } catch (_) {}
   }
 
-  // 2. Excel numeric serial date (e.g. 46255 for 2026-08-21)
-  if (typeof cellVal === "number" && !isNaN(cellVal) && cellVal > 0) {
+  // 2. Excel numeric serial date (e.g. 46255 or 46023.623 for 2026-01-01)
+  const numVal = typeof cellVal === "number" ? cellVal : (typeof cellVal === "string" && !cellVal.includes("-") && !cellVal.includes("/") && !isNaN(parseFloat(cellVal)) ? parseFloat(cellVal) : NaN);
+  if (!isNaN(numVal) && numVal >= 35000 && numVal <= 65000) {
     try {
-      const wholeDays = Math.floor(cellVal);
+      const wholeDays = Math.floor(numVal);
       // Excel epoch: 25569 days between 1899-12-30 and 1970-01-01
       const dateObj = new Date(Math.round((wholeDays - 25569) * 86400 * 1000));
       if (!isNaN(dateObj.getTime())) {
