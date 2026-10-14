@@ -27,7 +27,8 @@ import {
   SlidersHorizontal,
   Cloud,
   CloudOff,
-  CalendarDays
+  CalendarDays,
+  Target
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
@@ -42,6 +43,7 @@ import EgyPlanManagerModal from "./components/EgyPlanManagerModal";
 import PlanVsActualAssessment from "./components/PlanVsActualAssessment";
 import PlanFuelBurnPage from "./components/PlanFuelBurnPage";
 import DailyReviewView from "./components/DailyReviewView";
+import FuelBurnEvaluationView from "./components/FuelBurnEvaluationView";
 import UnitSelectorDropdown, { UnitItem } from "./components/UnitSelectorDropdown";
 import { 
   getStoredEgyPlans, 
@@ -206,8 +208,8 @@ export default function App() {
   const [selectedEgyFilter, setSelectedEgyFilter] = useState("SEMUA");
   const [selectedStorageFilter, setSelectedStorageFilter] = useState("SEMUA");
   const [viewingAnomaliesPage, setViewingAnomaliesPage] = useState(false);
-  const [activeTab, setActiveTab] = useState<"dashboard" | "daily" | "yearly" | "plan">(() => {
-    const meta = getSyncLocalData<{ activeTab?: "dashboard" | "daily" | "yearly" | "plan" }>("fuel_meta", { activeTab: "dashboard" });
+  const [activeTab, setActiveTab] = useState<"dashboard" | "daily" | "yearly" | "evaluation" | "plan">(() => {
+    const meta = getSyncLocalData<{ activeTab?: "dashboard" | "daily" | "yearly" | "evaluation" | "plan" }>("fuel_meta", { activeTab: "dashboard" });
     return meta?.activeTab || "dashboard";
   });
   const [selectedUnitFilter, setSelectedUnitFilter] = useState<string[]>([]);
@@ -2127,6 +2129,20 @@ export default function App() {
             </button>
             <button
               onClick={() => {
+                setActiveTab("evaluation");
+                setViewingAnomaliesPage(false);
+              }}
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+                activeTab === "evaluation"
+                  ? "bg-[#1E293B] text-white shadow"
+                  : "text-slate-600 hover:text-slate-800"
+              }`}
+            >
+              <Target className="w-4 h-4 text-emerald-400" />
+              <span>EVALUASI FUEL BURN</span>
+            </button>
+            <button
+              onClick={() => {
                 setActiveTab("plan");
                 setViewingAnomaliesPage(false);
               }}
@@ -2220,6 +2236,14 @@ export default function App() {
               selectMonth(ym);
               setActiveTab("dashboard");
             }}
+          />
+        ) : activeTab === "evaluation" ? (
+          <FuelBurnEvaluationView
+            records={records}
+            egyPlans={egyPlans}
+            unitPlans={unitRegistry}
+            initialMonth={startDate ? startDate.substring(0, 7) : undefined}
+            onBackToDashboard={() => setActiveTab("dashboard")}
           />
         ) : viewingAnomaliesPage ? (
           <AnomalyDetailsView
