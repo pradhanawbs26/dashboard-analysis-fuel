@@ -1545,7 +1545,7 @@ export default function YearlyReview({
         ? (rawPayload.rawFuelRecords as FuelRecord[])
         : [];
 
-      // If not a multi-month file, ensure all logs match the confirmed month and are properly distributed across days
+      // Target month index & pad
       const targetMonthIndex = getMonthFromText(confirmedMonth);
       const targetMonthPad = targetMonthIndex !== -1 ? String(targetMonthIndex + 1).padStart(2, "0") : "08";
       const daysInTargetMonth = new Date(2026, targetMonthIndex + 1, 0).getDate() || 30;
@@ -1555,23 +1555,36 @@ export default function YearlyReview({
       const isSingleDayOrInvalid = distinctDaysInRaw.size <= 1;
 
       const alignedLogs = rawLogs.map((r, rIdx) => {
-        if (!isMultiMonthFile) {
+        if (!r.tanggal) {
+          const dayNum = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
+          return { ...r, tanggal: `2026-${targetMonthPad}-${String(dayNum).padStart(2, "0")}` };
+        }
+
+        // If the date is already a valid ISO date YYYY-MM-DD:
+        if (/^\d{4}-\d{2}-\d{2}$/.test(r.tanggal)) {
+          const [yStr, mStr, dStr] = r.tanggal.split("-");
+          const mNum = parseInt(mStr, 10) - 1;
+          const dayNum = parseInt(dStr, 10);
+          const prevMonthIdx = (targetMonthIndex - 1 + 12) % 12;
+          const nextMonthIdx = (targetMonthIndex + 1) % 12;
+
+          // 1. If it already matches the confirmed month, keep it
+          if (mNum === targetMonthIndex) return r;
+
+          // 2. If it is legitimately from the end of the previous month (e.g. 2026-09-30 in October file)
+          // or from the start of the next month (e.g. 2026-10-01 in September file), PRESERVE IT!
+          // This represents operational rollover and end-of-month fueling.
+          if (mNum === prevMonthIdx && dayNum >= 28) return r;
+          if (mNum === nextMonthIdx && dayNum <= 3) return r;
+
+          // 3. If file only had a single fallback day (e.g. day 15), distribute chronologically across target month
           if (isSingleDayOrInvalid) {
-            // Distribute chronologically across the month so daily review is fully populated
-            const dayNum = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
-            const dayPart = String(dayNum).padStart(2, "0");
-            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
-          }
-          if (!r.tanggal.includes(`-${targetMonthPad}-`)) {
-            const parts = r.tanggal.split("-");
-            let dayPart = parts.length === 3 ? parts[2] : "";
-            if (!dayPart || isNaN(parseInt(dayPart, 10)) || parseInt(dayPart, 10) < 1 || parseInt(dayPart, 10) > daysInTargetMonth) {
-              const dayNum = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
-              dayPart = String(dayNum).padStart(2, "0");
-            }
-            return { ...r, tanggal: `2026-${targetMonthPad}-${dayPart}` };
+            const distributedDay = Math.min(daysInTargetMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rawLogs.length)) * daysInTargetMonth) + 1));
+            return { ...r, tanggal: `2026-${targetMonthPad}-${String(distributedDay).padStart(2, "0")}` };
           }
         }
+
+        // Fallback for non-standard formats
         return r;
       });
 
@@ -1612,27 +1625,90 @@ export default function YearlyReview({
         });
       }
 
+      // Determine all months present in finalLogsToSync
+      const logMonths = Array.from(new Set(finalLogsToSync.map(r => {
+        if (!r.tanggal) return "";
+        const parts = r.tanggal.split("-");
+        if (parts.length === 3) {
+          const mIdx = parseInt(parts[1], 10) - 1;
+          if (mIdx >= 0 && mIdx < 12) return MONTH_NAMES_IND[mIdx];
+        }
+        return "";
+      }))).filter(Boolean);
+
+      const allAffectedMonths = Array.from(new Set([...affectedMonths, ...logMonths, confirmedMonth]));
+
       // Save each affected month to Cloud Firestore
-      for (const mName of affectedMonths) {
-        const monthEntries = aggregatedParsed.filter(p => p.bulan === mName);
-        const mTotalVol = monthEntries.reduce((sum, p) => sum + p.totalVolume, 0);
-        const mTotalHrs = monthEntries.reduce((sum, p) => sum + p.totalHours, 0);
-        const mRecordCount = monthEntries.reduce((sum, p) => sum + p.recordCount, 0);
+      for (const mName of allAffectedMonths) {
         const mIdx = getMonthFromText(mName);
         const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
 
         // Extract transaction records specific to this month
         const monthRecords = finalLogsToSync.filter(r => mPad && r.tanggal.startsWith(`2026-${mPad}`));
+        
+        let monthEntries = aggregatedParsed.filter(p => p.bulan === mName);
+        if (monthEntries.length === 0 && monthRecords.length > 0) {
+          // Compute type summaries on-the-fly for carried-over months (e.g. Sept 30 in Oct upload)
+          const typeAgg: Record<string, { vol: number; hrs: number; count: number }> = {};
+          monthRecords.forEach(r => {
+            const t = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+            if (!typeAgg[t]) typeAgg[t] = { vol: 0, hrs: 0, count: 0 };
+            typeAgg[t].vol += r.volumeFuel;
+            if (!r.isAnomaly && r.selisihHm > 0) typeAgg[t].hrs += r.selisihHm;
+            typeAgg[t].count += 1;
+          });
+          monthEntries = Object.entries(typeAgg).map(([t, val]) => ({
+            bulan: mName,
+            typeAlat: t,
+            totalVolume: Number(val.vol.toFixed(1)),
+            totalHours: Number(val.hrs.toFixed(1)),
+            recordCount: val.count
+          }));
+        }
 
-        const unitSummaries = (stagingData.unitDetails || []).map(u => ({
-          idAlat: u.idAlat,
-          egy: u.egy,
-          typeAlat: u.typeAlat,
-          totalVolume: u.totalVolume,
-          totalHours: u.totalHours,
-          burnRate: u.burnRate,
-          recordCount: u.recordCount
-        }));
+        const mTotalVol = monthRecords.length > 0
+          ? monthRecords.reduce((sum, r) => sum + r.volumeFuel, 0)
+          : monthEntries.reduce((sum, p) => sum + p.totalVolume, 0);
+        const mTotalHrs = monthRecords.length > 0
+          ? monthRecords.reduce((sum, r) => (!r.isAnomaly && r.selisihHm > 0 ? sum + r.selisihHm : sum), 0)
+          : monthEntries.reduce((sum, p) => sum + p.totalHours, 0);
+        const mRecordCount = monthRecords.length > 0
+          ? monthRecords.length
+          : monthEntries.reduce((sum, p) => sum + p.recordCount, 0);
+
+        // Compute unit summaries for this month
+        const unitMap: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number }> = {};
+        if (monthRecords.length > 0) {
+          monthRecords.forEach(r => {
+            const id = r.idAlat || "UNIT-UNKNOWN";
+            const egy = r.egy || deriveEgy(r.idAlat, r.typeAlat);
+            const type = r.typeAlat || egy;
+            if (!unitMap[id]) unitMap[id] = { idAlat: id, egy, typeAlat: type, totalVolume: 0, totalHours: 0, count: 0 };
+            unitMap[id].totalVolume += r.volumeFuel;
+            if (!r.isAnomaly && r.selisihHm > 0) unitMap[id].totalHours += r.selisihHm;
+            unitMap[id].count += 1;
+          });
+        }
+
+        const unitSummaries = Object.keys(unitMap).length > 0
+          ? Object.values(unitMap).map(u => ({
+              idAlat: u.idAlat,
+              egy: u.egy,
+              typeAlat: u.typeAlat,
+              totalVolume: Number(u.totalVolume.toFixed(1)),
+              totalHours: Number(u.totalHours.toFixed(1)),
+              burnRate: u.totalHours > 0 ? Number((u.totalVolume / u.totalHours).toFixed(2)) : 0,
+              recordCount: u.count
+            }))
+          : (stagingData.unitDetails || []).map(u => ({
+              idAlat: u.idAlat,
+              egy: u.egy,
+              typeAlat: u.typeAlat,
+              totalVolume: u.totalVolume,
+              totalHours: u.totalHours,
+              burnRate: u.burnRate,
+              recordCount: u.recordCount
+            }));
 
         const reportPayload: MonthlyReportData = {
           id: `2026_${mName}`,
@@ -1676,9 +1752,9 @@ export default function YearlyReview({
       }
 
       // Merge into local state & storage for Yearly Review
-      const clean = dataPoints.filter(d => !affectedMonths.includes(d.bulan));
+      const clean = dataPoints.filter(d => !allAffectedMonths.includes(d.bulan));
       const nextPts = [...clean, ...aggregatedParsed];
-      const nextMonths = Array.from(new Set([...uploadedMonths, ...affectedMonths]));
+      const nextMonths = Array.from(new Set([...uploadedMonths, ...allAffectedMonths]));
 
       setDataPoints(nextPts);
       setUploadedMonths(nextMonths);
@@ -1692,7 +1768,7 @@ export default function YearlyReview({
         // Filter out existing logs for affected months to prevent duplicate stacking
         const existingFiltered = currentSavedRecords.filter(r => {
           if (!r.tanggal) return true;
-          return !affectedMonths.some(mName => {
+          return !allAffectedMonths.some(mName => {
             const mIdx = getMonthFromText(mName);
             const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
             return mPad && r.tanggal.startsWith(`2026-${mPad}`);

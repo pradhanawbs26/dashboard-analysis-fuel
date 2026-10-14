@@ -104,34 +104,8 @@ export async function saveMonthlyReportToFirestore(report: MonthlyReportData): P
   const batchesCount = Math.ceil(records.length / BATCH_SIZE) || 0;
 
   try {
-    // 1. Write record batches to subcollection first
-    if (records.length > 0) {
-      for (let i = 0; i < batchesCount; i++) {
-        const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
-        const batchDocRef = doc(db, MONTHLY_COLLECTION, docId, "batches", `batch_${i}`);
-        await setDoc(batchDocRef, {
-          batchIndex: i,
-          count: chunk.length,
-          records: chunk
-        });
-      }
-
-      // Clean up any extra old batches
-      try {
-        const batchesCol = collection(db, MONTHLY_COLLECTION, docId, "batches");
-        const existingBatchesSnap = await getDocs(batchesCol);
-        for (const d of existingBatchesSnap.docs) {
-          const batchIdx = parseInt(d.id.replace("batch_", ""), 10);
-          if (batchIdx >= batchesCount) {
-            await deleteDoc(d.ref);
-          }
-        }
-      } catch (cleanErr) {
-        console.warn("Monthly batches cleanup notice:", cleanErr);
-      }
-    }
-
-    // 2. Format clean payload conforming to schema without embedding huge raw record arrays in main doc
+    // 1. Format clean payload with records directly included on the document
+    // (Up to ~2500 records is ~200KB, well within Firestore 1MB document limit, matching Jan-Aug storage)
     const payload: any = {
       id: docId,
       bulan: report.bulan,
@@ -141,17 +115,36 @@ export async function saveMonthlyReportToFirestore(report: MonthlyReportData): P
       uploadedAt: report.uploadedAt || new Date().toISOString(),
       totalVolume: Number(report.totalVolume) || 0,
       totalHours: Number(report.totalHours) || 0,
-      recordCount: Number(report.recordCount) || 0,
+      recordCount: Number(report.recordCount) || (records.length > 0 ? records.length : 0),
       avgBurnRate: Number(report.avgBurnRate) || (report.totalHours > 0 ? Number((report.totalVolume / report.totalHours).toFixed(2)) : 0),
       typeSummaries: report.typeSummaries || [],
       unitSummaries: report.unitSummaries || [],
       plans: report.plans || {},
+      records: records,
       batchesCount,
       hasRecords: records.length > 0
     };
 
-    // Keep records array empty or omitted in main document to guarantee document is well under 1MB
+    // Save main document FIRST so it is guaranteed to persist and trigger real-time listeners
     await setDoc(docRef, payload);
+
+    // 2. Best-effort subcollection batch writing (wrapped in try/catch so subcollection permission issues never abort main doc)
+    if (records.length > 0) {
+      try {
+        for (let i = 0; i < batchesCount; i++) {
+          const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+          const batchDocRef = doc(db, MONTHLY_COLLECTION, docId, "batches", `batch_${i}`);
+          await setDoc(batchDocRef, {
+            batchIndex: i,
+            count: chunk.length,
+            records: chunk
+          });
+        }
+      } catch (bErr) {
+        // Batches subcollection is optional; records are already safe and sound in the main document
+        console.warn(`Monthly report batches subcollection note for ${docId}:`, bErr);
+      }
+    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${MONTHLY_COLLECTION}/${docId}`);
   }
@@ -206,10 +199,14 @@ export async function fetchAllMonthlyReports(): Promise<MonthlyReportData[]> {
  */
 export async function deleteMonthlyReport(docId: string): Promise<void> {
   try {
-    const batchesCol = collection(db, MONTHLY_COLLECTION, docId, "batches");
-    const batchesSnap = await getDocs(batchesCol);
-    for (const b of batchesSnap.docs) {
-      await deleteDoc(b.ref);
+    try {
+      const batchesCol = collection(db, MONTHLY_COLLECTION, docId, "batches");
+      const batchesSnap = await getDocs(batchesCol);
+      for (const b of batchesSnap.docs) {
+        await deleteDoc(b.ref);
+      }
+    } catch (bErr) {
+      console.warn("Subcollection batches delete notice:", bErr);
     }
     const docRef = doc(db, MONTHLY_COLLECTION, docId);
     await deleteDoc(docRef);

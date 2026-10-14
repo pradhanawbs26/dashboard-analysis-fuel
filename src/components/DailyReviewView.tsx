@@ -12,6 +12,7 @@ import {
   Fuel,
   Clock,
   ChevronRight,
+  ChevronDown,
   ArrowUpDown
 } from "lucide-react";
 import * as XLSX from "xlsx";
@@ -129,6 +130,8 @@ export interface AnomalyNoteItem {
   keterangan: string;
 }
 
+export type DateAccountingMode = "rollover_next_month" | "full_to_full" | "log_date";
+
 export default function DailyReviewView({
   records,
   initialStartDate = "",
@@ -178,10 +181,11 @@ export default function DailyReviewView({
     if (initialEndDate) setEndDate(initialEndDate);
   }, [initialStartDate, initialEndDate]);
 
-  // Accounting Mode: H-1 (Full-to-Full) vs H (Log Date) - Default to H (false) for direct 1-to-1 operational matching
-  const [useHMinusOne, setUseHMinusOne] = useState<boolean>(false);
+  // Accounting Mode: Default to "rollover_next_month" per mining operations requirement:
+  // Pengisian tgl 1 Oktober diambil sebagai konsumsi akhir bulan tanggal 30 September
+  const [dateAccountingMode, setDateAccountingMode] = useState<DateAccountingMode>("rollover_next_month");
 
-  // Quick Month Presets (Januari s/d September 2026)
+  // Quick Month Presets (Lengkap 12 Bulan Januari s/d Desember 2026)
   const monthPresets = [
     { label: "Jan", fullLabel: "Januari 2026", start: "2026-01-01", end: "2026-01-31" },
     { label: "Feb", fullLabel: "Februari 2026", start: "2026-02-01", end: "2026-02-28" },
@@ -192,7 +196,33 @@ export default function DailyReviewView({
     { label: "Jul", fullLabel: "Juli 2026", start: "2026-07-01", end: "2026-07-31" },
     { label: "Agt", fullLabel: "Agustus 2026", start: "2026-08-01", end: "2026-08-31" },
     { label: "Sep", fullLabel: "September 2026", start: "2026-09-01", end: "2026-09-30" },
+    { label: "Okt", fullLabel: "Oktober 2026", start: "2026-10-01", end: "2026-10-31" },
+    { label: "Nov", fullLabel: "November 2026", start: "2026-11-01", end: "2026-11-30" },
+    { label: "Des", fullLabel: "Desember 2026", start: "2026-12-01", end: "2026-12-31" },
   ];
+
+  // Derived active selected month in dropdown selector
+  const activeMonthSelectValue = useMemo(() => {
+    const matchedPreset = monthPresets.find(mp => mp.start === startDate && mp.end === endDate);
+    if (matchedPreset) return matchedPreset.start;
+    if (startDate === minMaxDates.min && endDate === minMaxDates.max) return "ALL";
+    return "CUSTOM";
+  }, [startDate, endDate, minMaxDates]);
+
+  const handleMonthChange = (val: string) => {
+    if (val === "ALL") {
+      setStartDate(minMaxDates.min);
+      setEndDate(minMaxDates.max);
+    } else if (val === "CUSTOM") {
+      // Keep current custom range
+    } else {
+      const preset = monthPresets.find(mp => mp.start === val);
+      if (preset) {
+        setStartDate(preset.start);
+        setEndDate(preset.end);
+      }
+    }
+  };
 
   // Active view table mode: ALL, FUEL_BURN, VOLUME, HOURMETER
   const [activeViewTable, setActiveViewTable] = useState<"ALL" | "FUEL_BURN" | "VOLUME" | "HOURMETER">("ALL");
@@ -256,12 +286,32 @@ export default function DailyReviewView({
       // Aggregate records into corresponding date
       unitRecs.forEach(r => {
         if (!r.tanggal) return;
+        
         // Determine the target date based on accounting mode
-        const targetDate = useHMinusOne ? getPreviousDay(r.tanggal) : r.tanggal;
+        let targetDate = r.tanggal;
+        let isRolloverApplied = false;
+        
+        if (dateAccountingMode === "full_to_full") {
+          targetDate = getPreviousDay(r.tanggal);
+        } else if (dateAccountingMode === "rollover_next_month") {
+          // If transaction is logged on the 1st of a month (e.g. 2026-10-01),
+          // and the reviewed period includes the last day of the previous month (e.g. 2026-09-30),
+          // map this record as the operational consumption of the month's final day!
+          if (r.tanggal.endsWith("-01")) {
+            const prevDay = getPreviousDay(r.tanggal);
+            if (dailyMap.has(prevDay)) {
+              targetDate = prevDay;
+              isRolloverApplied = true;
+            }
+          }
+        }
         
         // Only include if date falls in active range
         if (dailyMap.has(targetDate)) {
           const cell = dailyMap.get(targetDate)!;
+          if (isRolloverApplied) {
+            cell.notes.push(`Log pengisian ${r.tanggal} ditarik sebagai konsumsi akhir bulan ${targetDate}`);
+          }
           cell.volumeFuel += r.volumeFuel;
           cell.hasFuel = cell.volumeFuel > 0;
 
@@ -298,8 +348,9 @@ export default function DailyReviewView({
           }
 
           // Accumulate valid HM
-          if (!r.isAnomaly && r.selisihHm > 0) {
-            cell.selisihHm += r.selisihHm;
+          const effectiveHm = r.selisihHm > 0 ? r.selisihHm : (r.hmSaatIni > r.hmSebelum ? Number((r.hmSaatIni - r.hmSebelum).toFixed(1)) : 0);
+          if (!r.isAnomaly && effectiveHm > 0) {
+            cell.selisihHm += effectiveHm;
             cell.hasOperation = true;
           }
         }
@@ -360,7 +411,7 @@ export default function DailyReviewView({
       totalPeriodFuel: periodFuel,
       totalPeriodHm: periodHm
     };
-  }, [records, selectedEgy, startDate, endDate, dateColumns, useHMinusOne, unitPlans, egyPlans]);
+  }, [records, selectedEgy, startDate, endDate, dateColumns, dateAccountingMode, unitPlans, egyPlans]);
 
   // Export Daily Review to Excel (Multi-Sheet: Fuel Burn, Volume Fuel, Hour Meter)
   const handleExportExcel = () => {
@@ -369,6 +420,11 @@ export default function DailyReviewView({
       return;
     }
 
+    const accountingModeLabel = 
+      dateAccountingMode === "rollover_next_month" 
+        ? "Rollover Akhir Bulan (Tgl 1 ke Akhir Bulan Sebelumnya)" 
+        : (dateAccountingMode === "full_to_full" ? "Konsumsi H-1 (Standar Full-to-Full)" : "Tanggal Pengisian Log Asli (H)");
+
     const wb = XLSX.utils.book_new();
     const headersDate = dateColumns.map(d => formatColHeaderDate(d));
 
@@ -376,7 +432,7 @@ export default function DailyReviewView({
     const fuelBurnRows: any[][] = [
       ["PILIHAN EGY", selectedEgy],
       ["PERIODE", `${startDate} s/d ${endDate}`],
-      ["METODE TANGGAL", useHMinusOne ? "Konsumsi H-1 (Standar Full-to-Full)" : "Tanggal Pengisian Log (H)"],
+      ["METODE TANGGAL", accountingModeLabel],
       [],
       ["FUEL BURN (LITER/HOUR)"],
       ["NOMOR UNIT", ...headersDate, "RATA-RATA (L/JAM)", "PLAN (L/JAM)", "STATUS"]
@@ -411,7 +467,7 @@ export default function DailyReviewView({
     const volumeRows: any[][] = [
       ["PILIHAN EGY", selectedEgy],
       ["PERIODE", `${startDate} s/d ${endDate}`],
-      ["METODE TANGGAL", useHMinusOne ? "Konsumsi H-1 (Standar Full-to-Full)" : "Tanggal Pengisian Log (H)"],
+      ["METODE TANGGAL", accountingModeLabel],
       [],
       ["VOLUME FUEL (LITER)"],
       ["NOMOR UNIT", ...headersDate, "TOTAL VOLUME (LITER)"]
@@ -438,7 +494,7 @@ export default function DailyReviewView({
     const hmRows: any[][] = [
       ["PILIHAN EGY", selectedEgy],
       ["PERIODE", `${startDate} s/d ${endDate}`],
-      ["METODE TANGGAL", useHMinusOne ? "Konsumsi H-1 (Standar Full-to-Full)" : "Tanggal Pengisian Log (H)"],
+      ["METODE TANGGAL", accountingModeLabel],
       [],
       ["HOUR METER (HOUR)"],
       ["NOMOR UNIT", ...headersDate, "TOTAL HM (JAM)", "CATATAN ANOMALI HM"]
@@ -505,55 +561,47 @@ export default function DailyReviewView({
 
       {/* TOP CONTROL PANEL & FILTER BAR */}
       <div className="bg-white rounded-2xl p-5 border border-slate-200 shadow-xs space-y-4">
-
-        {/* PILIHAN CEPAT BULAN (JAN - SEP 2026) */}
-        <div className="flex flex-wrap items-center gap-1.5 pb-3 border-b border-slate-100">
-          <span className="text-[10px] font-black text-slate-500 uppercase tracking-wider mr-1.5 flex items-center gap-1">
-            <Calendar className="w-3.5 h-3.5 text-[#4682B4]" />
-            <span>Pilih Cepat Bulan:</span>
-          </span>
-          {monthPresets.map(mp => {
-            const isActive = startDate === mp.start && endDate === mp.end;
-            return (
-              <button
-                key={mp.start}
-                type="button"
-                onClick={() => {
-                  setStartDate(mp.start);
-                  setEndDate(mp.end);
-                }}
-                className={`text-xs px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
-                  isActive
-                    ? "bg-[#4682B4] text-white shadow-xs"
-                    : "bg-slate-100 hover:bg-slate-200 text-slate-700 border border-slate-200"
-                }`}
-                title={`Tampilkan seluruh data ${mp.fullLabel}`}
-              >
-                {mp.fullLabel}
-              </button>
-            );
-          })}
-          <button
-            type="button"
-            onClick={() => {
-              setStartDate(minMaxDates.min);
-              setEndDate(minMaxDates.max);
-            }}
-            className={`text-xs px-3 py-1.5 rounded-lg font-bold transition cursor-pointer ${
-              startDate === minMaxDates.min && endDate === minMaxDates.max
-                ? "bg-slate-800 text-white shadow-xs"
-                : "bg-slate-100 hover:bg-slate-200 text-slate-600 border border-slate-200"
-            }`}
-            title="Tampilkan seluruh rentang data yang tersedia di sistem"
-          >
-            Semua Periode
-          </button>
-        </div>
         
         <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
           
-          {/* PILIHAN EGY & PERIODE WAKTU */}
+          {/* PILIHAN BULAN, EGY, PERIODE WAKTU & METODE TANGGAL */}
           <div className="flex flex-wrap items-center gap-4">
+            
+            {/* PILIH BULAN (MENU DROP DOWN) */}
+            <div className="flex flex-col">
+              <label className="text-[11px] font-black text-slate-800 uppercase tracking-wider flex items-center gap-1.5 mb-1">
+                <span className="bg-[#4682B4] text-white px-2 py-0.5 rounded font-bold text-xs shadow-2xs flex items-center gap-1">
+                  <Calendar className="w-3.5 h-3.5 text-white" />
+                  PILIH BULAN
+                </span>
+              </label>
+              <div className="relative">
+                <select
+                  value={activeMonthSelectValue}
+                  onChange={(e) => handleMonthChange(e.target.value)}
+                  className="text-xs font-bold border border-slate-300 rounded-lg pl-3 pr-8 py-2 bg-slate-50 text-slate-900 focus:border-[#4682B4] focus:outline-none cursor-pointer shadow-2xs appearance-none min-w-[200px]"
+                >
+                  <optgroup label="Bulan Tahun 2026">
+                    {monthPresets.map(mp => (
+                      <option key={mp.start} value={mp.start}>
+                        {mp.fullLabel}
+                      </option>
+                    ))}
+                  </optgroup>
+                  <optgroup label="Pilihan Lain">
+                    <option value="ALL">Semua Periode Data</option>
+                    {activeMonthSelectValue === "CUSTOM" && (
+                      <option value="CUSTOM" disabled>
+                        Kustom ({startDate} s/d {endDate})
+                      </option>
+                    )}
+                  </optgroup>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2.5 text-slate-500">
+                  <ChevronDown className="w-3.5 h-3.5" />
+                </div>
+              </div>
+            </div>
             
             {/* PILIHAN EGY (Yellow badge style matching user's uploaded spreadsheet) */}
             <div className="flex flex-col">
@@ -599,30 +647,34 @@ export default function DailyReviewView({
               </div>
             </div>
 
-            {/* METODE PERHITUNGAN TANGGAL: FULL-TO-FULL (H-1) VS LOG DATE */}
+            {/* METODE PERHITUNGAN TANGGAL: ROLLOVER AKHIR BULAN VS FULL-TO-FULL VS TANGGAL FISIK */}
             <div className="flex flex-col justify-end">
               <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
                 <span>METODE TANGGAL</span>
                 <span 
-                  title="Standar Tambang Full-to-Full: Pengisian solar di tgl 2 September merupakan konsumsi bahan bakar pada operasional tgl 1 September (H-1)."
+                  title="Pilihan metode penanggalan: 
+1. Rollover Akhir Bulan: Pengisian tgl 1 dihitung sebagai konsumsi tgl 30/31 akhir bulan sebelumnya.
+2. Konsumsi H-1 (Full-to-Full): Seluruh tanggal pengisian digeser 1 hari ke belakang.
+3. Tanggal Fisik (H): Mengikuti tanggal persis di log transaksi."
                   className="cursor-help"
                 >
-                  <HelpCircle className="w-3 h-3 text-slate-400" />
+                  <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
                 </span>
               </label>
-              <button
-                type="button"
-                onClick={() => setUseHMinusOne(!useHMinusOne)}
-                className={`text-xs px-3 py-1.5 rounded-lg border font-bold flex items-center gap-1.5 transition cursor-pointer shadow-2xs ${
-                  useHMinusOne
-                    ? "bg-blue-50 text-blue-800 border-blue-300 hover:bg-blue-100"
-                    : "bg-slate-100 text-slate-700 border-slate-300 hover:bg-slate-200"
-                }`}
-                title="Klik untuk beralih antara Tanggal Konsumsi H-1 (Full-to-Full) dan Tanggal Pengisian Asli"
-              >
-                <span className="w-2 h-2 rounded-full bg-[#4682B4]"></span>
-                <span>{useHMinusOne ? "Konsumsi H-1 (Full-to-Full)" : "Tanggal Log Asli (H)"}</span>
-              </button>
+              <div className="relative">
+                <select
+                  value={dateAccountingMode}
+                  onChange={(e) => setDateAccountingMode(e.target.value as DateAccountingMode)}
+                  className="text-xs font-bold border border-slate-300 rounded-lg pl-3 pr-8 py-2 bg-slate-50 text-slate-800 focus:border-[#4682B4] focus:outline-none cursor-pointer shadow-2xs appearance-none"
+                >
+                  <option value="rollover_next_month">🔄 Rollover Akhir Bulan (Tgl 1 ➔ Akhir Bln)</option>
+                  <option value="full_to_full">⏱️ Konsumsi H-1 (Full-to-Full)</option>
+                  <option value="log_date">📅 Tanggal Fisik Asli (H)</option>
+                </select>
+                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
+                  <ArrowUpDown className="w-3.5 h-3.5" />
+                </div>
+              </div>
             </div>
 
           </div>

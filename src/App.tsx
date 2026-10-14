@@ -2236,42 +2236,9 @@ export default function App() {
           />
         ) : (
           <>
-            {/* SOURCE SELECTOR TABS BETWEEN OFFLINE AND LIVE SHEET */}
-            <div className="flex items-center gap-1.5 mb-4 bg-slate-100 p-1.5 rounded-xl w-fit border border-slate-200/80 font-sans">
-              <button
-                onClick={() => {
-                  setIsGoogleSheetsActive(false);
-                  setFileFeedback({ type: null, message: "" });
-                }}
-                className={`flex items-center gap-2 text-xs font-extrabold px-4 py-2 rounded-lg transition-all cursor-pointer ${
-                  !isGoogleSheetsActive 
-                    ? "bg-[#4682B4] text-white shadow-sm" 
-                    : "text-slate-650 hover:text-slate-800 hover:bg-slate-200/50"
-                }`}
-              >
-                <FileSpreadsheet className="w-3.5 h-3.5" />
-                <span>Upload File Excel / CSV</span>
-              </button>
-              
-              <button
-                onClick={() => {
-                  setIsGoogleSheetsActive(true);
-                  setFileFeedback({ type: null, message: "" });
-                }}
-                className={`flex items-center gap-2 text-xs font-extrabold px-4 py-2 rounded-lg transition-all cursor-pointer ${
-                  isGoogleSheetsActive 
-                    ? "bg-[#4682B4] text-white shadow-sm" 
-                    : "text-slate-650 hover:text-slate-800 hover:bg-slate-200/50"
-                }`}
-              >
-                <Globe className="w-3.5 h-3.5" />
-                <span>Google Spreadsheet Live</span>
-              </button>
-            </div>
-
             {/* Step-by-Step File Preview and Manual Analysis Trigger */}
             {selectedFile ? (
-              <div className="bg-white rounded-xl border-2 border-amber-400 p-5 shadow-sm font-sans relative overflow-hidden animate-fade-in">
+              <div className="bg-white rounded-xl border-2 border-amber-400 p-5 shadow-sm font-sans relative overflow-hidden animate-fade-in mb-4">
                 <div className="absolute top-0 left-0 bottom-0 w-1.5 bg-amber-500"></div>
                 <div className="flex flex-col md:flex-row md:items-center justify-between gap-5 pl-1.5">
                   <div className="flex items-start gap-4">
@@ -2337,28 +2304,31 @@ export default function App() {
                   </div>
                 </div>
               </div>
-            ) : !isGoogleSheetsActive ? (
-              /* Real-time File Drop Zone / Import Selector Bar */
+            ) : (
+              /* Real-time File Drop Zone / Import Selector Bar - Focused on Excel */
               <div 
                 onDragOver={(e) => { e.preventDefault(); setIsDragging(true); }}
                 onDragLeave={() => setIsDragging(false)}
                 onDrop={handleFileDrop}
-                className={`border-2 border-dashed rounded-xl p-5 transition-all text-center sm:text-left flex flex-col md:flex-row items-center justify-between gap-4 ${
+                className={`border-2 border-dashed rounded-2xl p-5 mb-4 transition-all text-center sm:text-left flex flex-col md:flex-row items-center justify-between gap-4 ${
                   isDragging 
                     ? "border-[#4682B4] bg-[#4682B4]/5 shadow" 
-                    : "border-slate-200 hover:border-[#4682B4]/60 bg-white shadow-sm"
+                    : "border-slate-200 hover:border-[#4682B4]/60 bg-white shadow-xs"
                 }`}
               >
                 <div className="flex flex-col sm:flex-row items-center sm:items-start gap-4">
-                  <div className="p-3 bg-[#4682B4]/10 text-[#4682B4] rounded-xl self-center shrink-0">
-                    <FileSpreadsheet className="w-6 h-6" />
+                  <div className="p-3.5 bg-emerald-50 text-emerald-600 rounded-2xl self-center shrink-0 border border-emerald-100">
+                    <FileSpreadsheet className="w-7 h-7" />
                   </div>
                   <div>
-                    <h3 className="text-xs font-extrabold text-slate-800 tracking-tight flex items-center gap-1.5 justify-center sm:justify-start">
-                      <span>Upload File Report Fuel dalam bentuk excel</span>
+                    <h3 className="text-sm font-extrabold text-slate-800 tracking-tight flex items-center gap-2 justify-center sm:justify-start">
+                      <span>Upload File Report Fuel Excel</span>
+                      <span className="text-[10px] font-bold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-full">
+                        .xlsx / .xls
+                      </span>
                     </h3>
-                    <p className="text-[10px] text-slate-400 mt-1 tracking-normal">
-                      Seret report fuel kesini atau klik tombol untuk memilih lembar kerja Excel (.xlsx, .xls) untuk dianalisa.
+                    <p className="text-xs text-slate-400 mt-1 tracking-normal max-w-xl">
+                      Seret file Excel report fuel ke sini atau klik tombol untuk memilih berkas Excel langsung dari perangkat Anda.
                     </p>
                   </div>
                 </div>
@@ -2367,16 +2337,10 @@ export default function App() {
                   <button 
                     onClick={triggerFileDialog}
                     disabled={isProcessingFile}
-                    className="text-xs bg-[#4682B4] hover:bg-[#36648B] disabled:opacity-50 text-white px-4 py-2.5 rounded-lg font-bold transition shadow-sm cursor-pointer active:scale-95"
+                    className="text-xs bg-[#4682B4] hover:bg-[#36648B] disabled:opacity-50 text-white px-5 py-3 rounded-xl font-bold transition shadow-sm cursor-pointer active:scale-95 flex items-center gap-2"
                   >
-                    Pilih File Excel / CSV
-                  </button>
-                  <button 
-                    onClick={handleResetToSample}
-                    className="text-xs bg-slate-100 hover:bg-slate-200 text-slate-600 px-3.5 py-2.5 rounded-lg font-bold transition cursor-pointer"
-                    title="Gunakan dataset standar default"
-                  >
-                    Reset Data Contoh
+                    <Upload className="w-4 h-4 text-sky-100" />
+                    <span>Upload File Excel</span>
                   </button>
                   <input 
                     ref={fileInputRef}
@@ -2387,161 +2351,11 @@ export default function App() {
                   />
                 </div>
               </div>
-            ) : (
-              /* Google Spreadsheet Live Sync Connector Card */
-              <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 font-sans space-y-4">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 pb-3 border-b border-slate-100">
-                  <div className="flex items-center gap-3">
-                    <div className="p-2.5 bg-emerald-50 text-emerald-600 rounded-xl">
-                      <Globe className="w-5 h-5" />
-                    </div>
-                    <div>
-                      <h3 className="text-xs font-extrabold text-slate-800 tracking-tight">Koneksi Real-time Google Spreadsheet</h3>
-                      <p className="text-[10px] text-slate-400 mt-0.5">Integrasikan data pengisian BBM bulanan PT. WBS dari Google Sheets secara live.</p>
-                    </div>
-                  </div>
-
-                  {googleUser ? (
-                    <div className="flex items-center gap-3 bg-slate-50 border border-slate-200 p-1.5 rounded-lg text-xs font-medium">
-                      <div className="w-6 h-6 rounded-full bg-[#4682B4] text-white flex items-center justify-center font-bold text-[10px] uppercase">
-                        {googleUser.displayName ? googleUser.displayName.charAt(0) : (googleUser.email ? googleUser.email.charAt(0) : "U")}
-                      </div>
-                      <div className="text-left leading-tight hidden sm:block">
-                        <p className="font-bold text-slate-705 text-[11px] truncate max-w-[120px]">{googleUser.displayName || "Google User"}</p>
-                        <p className="text-[9px] text-slate-400 truncate max-w-[120px]">{googleUser.email}</p>
-                      </div>
-                      <button 
-                        onClick={handleGoogleLogout}
-                        className="text-slate-400 hover:text-rose-600 transition p-1 hover:bg-slate-100 rounded cursor-pointer"
-                        title="Putuskan tautan akun"
-                      >
-                        <LogOut className="w-3.5 h-3.5" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button 
-                      onClick={handleGoogleLogin}
-                      disabled={googleLoading}
-                      className="text-xs font-bold border border-slate-200 rounded-lg px-3.5 py-2 hover:bg-slate-50 transition flex items-center gap-2 cursor-pointer bg-white"
-                    >
-                      <svg version="1.1" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" className="w-4 h-4">
-                        <path fill="#EA4335" d="M24 9.5c3.54 0 6.71 1.22 9.21 3.6l6.85-6.85C35.9 2.38 30.47 0 24 0 14.62 0 6.51 5.38 2.56 13.22l7.98 6.19C12.43 13.72 17.74 9.5 24 9.5z"></path>
-                        <path fill="#4285F4" d="M46.98 24.55c0-1.57-.15-3.09-.38-4.55H24v9.02h12.94c-.58 2.96-2.26 5.48-4.78 7.18l7.73 6c4.51-4.18 7.09-10.36 7.09-17.65z"></path>
-                        <path fill="#FBBC05" d="M10.53 28.59c-.48-1.45-.76-2.99-.76-4.59s.27-3.14.76-4.59l-7.98-6.19C.92 16.46 0 20.12 0 24c0 3.88.92 7.54 2.56 10.78l7.97-6.19z"></path>
-                        <path fill="#34A853" d="M24 48c6.48 0 11.93-2.13 15.89-5.81l-7.73-6c-2.15 1.45-4.92 2.3-8.16 2.3-6.26 0-11.57-4.22-13.47-9.91l-7.98 6.19C6.51 42.62 14.62 48 24 48z"></path>
-                        <path fill="none" d="M0 0h48v48H0z"></path>
-                      </svg>
-                      <span>Hubungkan Google Akun</span>
-                    </button>
-                  )}
-                </div>
-
-                {!sheetsAccessToken ? (
-                  <div className="flex flex-col items-center justify-center py-6 text-center text-slate-500">
-                    <Globe className="w-10 h-10 text-slate-300 shrink-0 mb-2 animate-pulse" />
-                    <p className="text-xs font-bold text-slate-700">Google Akun Belum Terhubung</p>
-                    <p className="text-[10px] text-slate-400 mt-1 max-w-sm">Hubungkan Google Akun Anda yang memiliki hak akses membaca file Spreadsheet tersebut untuk mulai sinkronisasi.</p>
-                  </div>
-                ) : (
-                  <div className="space-y-4">
-                    {/* URL Input Form */}
-                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-2.5">
-                      <div className="relative flex-1">
-                        <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-                        <input 
-                          type="text"
-                          placeholder="Paste link share / edit Google Spreadsheet PT. WBS di sini..."
-                          className="w-full text-xs pl-9.5 pr-4 py-3 border border-slate-200 rounded-xl focus:border-[#4682B4] focus:outline-none focus:ring-1 focus:ring-[#4682B4]/40"
-                          value={spreadsheetUrl}
-                          onChange={(e) => setSpreadsheetUrl(e.target.value)}
-                        />
-                      </div>
-                      <button
-                        onClick={handleLoadSpreadsheetMetadata}
-                        disabled={googleLoading || !spreadsheetUrl.trim()}
-                        className="text-xs bg-[#4682B4] hover:bg-[#36648B] disabled:opacity-40 text-white px-5 py-3 rounded-xl font-bold transition flex items-center justify-center gap-2 cursor-pointer whitespace-nowrap active:scale-95"
-                      >
-                        {googleLoading ? (
-                          <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-                        ) : (
-                          <Check className="w-3.5 h-3.5" />
-                        )}
-                        <span>{googleLoading ? "Menghubungkan..." : "Hubungkan Sheet"}</span>
-                      </button>
-                    </div>
-
-                    {/* Metadata & Controls Panel */}
-                    {spreadsheetMetadata && (
-                      <div className="bg-slate-50 border border-slate-200 rounded-xl p-4 space-y-3 animate-fade-in text-left">
-                        <div className="flex items-center gap-2 pb-2.5 border-b border-slate-200">
-                          <FileText className="w-4 h-4 text-[#4682B4]" />
-                          <span className="text-xs font-extrabold text-slate-800">
-                            Spreadsheet Aktif: <strong className="text-[#4682B4] ml-1">{spreadsheetMetadata.title}</strong>
-                          </span>
-                        </div>
-
-                        <div className="flex flex-col sm:flex-row gap-4">
-                          {/* Log sheet dropdown */}
-                          <div className="flex-1 space-y-1.5 text-left">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Pilih Sheet Data Logs FUEL:</label>
-                            <div className="relative inline-block w-full">
-                              <select
-                                value={sheetsSelectedLogTab}
-                                onChange={(e) => setSheetsSelectedLogTab(e.target.value)}
-                                className="w-full text-xs border border-slate-300 rounded-xl px-3 text-slate-705 bg-white font-bold py-2 focus:border-[#4682B4] focus:outline-none cursor-pointer pr-10 appearance-none shadow-sm"
-                              >
-                                {spreadsheetMetadata.sheets.map((s) => (
-                                  <option key={s} value={s}>
-                                    {s}
-                                  </option>
-                                ))}
-                              </select>
-                              <ChevronDown className="w-4 h-4 text-slate-600 absolute right-3 top-2.5 pointer-events-none" />
-                            </div>
-                          </div>
-
-                          {/* Plan sheet dropdown */}
-                          <div className="flex-1 space-y-1.5 text-left">
-                            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider block">Sheet Target Plans (Opsional):</label>
-                            <div className="relative inline-block w-full">
-                              <select
-                                value={sheetsSelectedPlanTab}
-                                onChange={(e) => setSheetsSelectedPlanTab(e.target.value)}
-                                className="w-full text-xs border border-slate-300 rounded-xl px-3 text-slate-705 bg-white font-bold py-2 focus:border-[#4682B4] focus:outline-none cursor-pointer pr-10 appearance-none shadow-sm"
-                              >
-                                <option value="">-- Gunakan Target Standar --</option>
-                                {spreadsheetMetadata.sheets.map((s) => (
-                                  <option key={s} value={s}>
-                                    {s === "List & FC" ? `${s} (Target Plans)` : s}
-                                  </option>
-                                ))}
-                              </select>
-                              <ChevronDown className="w-4 h-4 text-slate-600 absolute right-3 top-2.5 pointer-events-none" />
-                            </div>
-                          </div>
-                        </div>
-
-                        {/* Start import button */}
-                        <div className="pt-2 border-t border-slate-100 flex justify-end">
-                          <button
-                            onClick={handleImportGoogleSheetData}
-                            disabled={isProcessingFile}
-                            className="text-xs bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 text-white px-5 py-2.5 rounded-xl font-bold flex items-center gap-2 cursor-pointer shadow-sm active:scale-95 transition duration-150"
-                          >
-                            <Sparkles className="w-4 h-4 text-emerald-100" />
-                            <span>{isProcessingFile ? "Sedang Sinkronisasi..." : "Mulai Sinkronisasi & Analisa"}</span>
-                          </button>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-              </div>
             )}
 
         {/* Dynamic Process Indicator and File Feedback Banner */}
         {fileFeedback.type && (
-          <div className="space-y-3">
+          <div className="space-y-3 mb-4">
             <div className={`p-4 rounded-xl border flex items-start gap-3 transition-all animate-fade-in ${
               fileFeedback.type === "success" 
                 ? "bg-[#E6F4EA] border-[#B3E1C1] text-[#137333]" 
@@ -2554,150 +2368,11 @@ export default function App() {
               )}
               <div className="text-xs font-medium font-sans flex-1">
                 <strong className="block font-bold mb-0.5 text-rose-900">
-                  {fileFeedback.type === "success" ? "Proses Impor Sukses!" : "Kesalahan Pembacaan Berkas/Spreadsheet!"}
+                  {fileFeedback.type === "success" ? "Proses Impor Sukses!" : "Kesalahan Pembacaan Berkas Excel!"}
                 </strong>
                 <span>{fileFeedback.message}</span>
               </div>
             </div>
-
-            {/* Check if this is the "Office file" Google API error and show interactive step-by-step conversion assistant */}
-            {fileFeedback.type === "error" && (
-              fileFeedback.message.toLowerCase().includes("office file") || 
-              fileFeedback.message.toLowerCase().includes("not be an office file") ||
-              fileFeedback.message.toLowerCase().includes("precondition")
-            ) && (
-              <div className="bg-amber-50/70 border border-amber-300 rounded-2xl p-5 sm:p-6 text-left font-sans text-slate-800 space-y-4 shadow-sm animate-fade-in">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-amber-200">
-                  <div className="p-1 px-2.5 bg-amber-500 text-slate-950 font-black text-[10px] uppercase rounded-full tracking-wider shrink-0">
-                    Solusi Cepat
-                  </div>
-                  <h4 className="font-extrabold text-sm text-yellow-950">Cara Konversi Excel (.xlsx) ke Google Spreadsheet Asli</h4>
-                </div>
-                
-                <p className="text-xs text-slate-700 leading-relaxed">
-                  <strong>Mengapa error ini muncul?</strong> Tautan yang Anda masukkan adalah berkas Microsoft Excel (.xlsx) yang diunggah ke Google Drive. Layanan resmi <strong>Google Sheets API</strong> hanya mendukung sinkronisasi data dari berkas berformat asli <strong>Google Spreadsheet</strong> (berikon hijau pekat), bukan berkas Excel (berikon hijau muda dengan huruf "X").
-                </p>
-
-                <div className="bg-white border border-amber-200 rounded-xl p-4 space-y-3.5">
-                  <p className="text-xs font-bold text-slate-805">Ikuti 5 langkah mudah berikut (hanya butuh waktu sekitar 10 detik):</p>
-                  
-                  <div className="space-y-3 text-xs leading-relaxed text-slate-650 pl-0.5">
-                    {/* Step 1 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-[10px] font-bold text-amber-800 shrink-0 border border-amber-200 mt-0.5">1</div>
-                      <div>
-                        {spreadsheetUrl ? (
-                          <span>
-                            Buka tautan Excel Anda sekarang dengan mengeklik tombol ini:{" "}
-                            <a 
-                              href={spreadsheetUrl} 
-                              target="_blank" 
-                              rel="noreferrer" 
-                              className="inline-flex items-center gap-1 font-bold text-[#4682B4] hover:underline bg-sky-50 border border-sky-200 rounded-md px-1.5 py-0.5 text-[11px]"
-                            >
-                              <span>Buka File Spreadsheet</span>
-                              <Globe className="w-3 h-3" />
-                            </a>
-                          </span>
-                        ) : (
-                          <span>Buka file Excel Anda di browser Google Sheets.</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Step 2 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-[10px] font-bold text-amber-800 shrink-0 border border-amber-200 mt-0.5">2</div>
-                      <div>
-                        Pada menu bar Google Sheets di bagian kiri atas, klik menu <strong>File (Berkas)</strong>.
-                      </div>
-                    </div>
-
-                    {/* Step 3 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-[10px] font-bold text-amber-800 shrink-0 border border-amber-200 mt-0.5">3</div>
-                      <div>
-                        Pilih opsi <strong>Save as Google Sheets (Simpan sebagai Google Spreadsheet)</strong>.
-                      </div>
-                    </div>
-
-                    {/* Step 4 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-[10px] font-bold text-amber-800 shrink-0 border border-amber-200 mt-0.5">4</div>
-                      <div>
-                        Google akan membuka tab baru berisi file Google Spreadsheet asli. <strong>Salin (copy) link URL baru tersebut seluruhnya</strong> yang ada di bilah alamat browser Anda.
-                      </div>
-                    </div>
-
-                    {/* Step 5 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-amber-100 flex items-center justify-center text-[10px] font-bold text-amber-800 shrink-0 border border-amber-200 mt-0.5">5</div>
-                      <div>
-                        Tempelkan (paste) link baru tersebut di kolom pencarian di atas, klik <strong>Hubungkan Sheet</strong>, lalu lakukan sinkronisasi data kembali. Sinkronisasi dijamin akan berjalan mulus 100%!
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-[11px] text-amber-900 bg-amber-100/50 p-2.5 rounded-lg">
-                  <Sparkles className="w-3.5 h-3.5 text-amber-600 shrink-0" />
-                  <span><strong>Tip Cepat:</strong> Ikon format Microsoft Excel di Google Drive biasanya bertuliskan <span className="font-mono bg-white border border-amber-300 px-1 py-0.25 rounded text-[10px]">.XLSX</span> di sebelah nama dokumen. Konversi file di atas akan menghasilkan dokumen baru tanpa label tersebut yang sepenuhnya ramah API.</span>
-                </div>
-              </div>
-            )}
-
-            {/* Check if this is the "Failed to fetch" Google API error and show interactive step-by-step diagnostic guide */}
-            {fileFeedback.type === "error" && (
-              fileFeedback.message.toLowerCase().includes("failed to fetch") ||
-              fileFeedback.message.toLowerCase().includes("credentials") ||
-              fileFeedback.message.toLowerCase().includes("kedaluwarsa")
-            ) && (
-              <div className="bg-sky-50/70 border border-sky-300 rounded-2xl p-5 sm:p-6 text-left font-sans text-slate-800 space-y-4 shadow-sm animate-fade-in">
-                <div className="flex items-center gap-2.5 pb-2.5 border-b border-sky-200">
-                  <div className="p-1 px-2.5 bg-sky-600 text-white font-black text-[10px] uppercase rounded-full tracking-wider shrink-0">
-                    Bantuan Koneksi
-                  </div>
-                  <h4 className="font-extrabold text-sm text-sky-950">Cara Mengatasi Koneksi Google Sheets Terputus (Failed to Fetch)</h4>
-                </div>
-                
-                <p className="text-xs text-slate-705 leading-relaxed">
-                  Pesan <strong>Failed to fetch</strong> adalah kendala umum peramban (browser) saat koneksi terhalang atau token akses kadaluarsa. Silakan ikuti 3 langkah mudah berikut untuk memulihkannya secara instan:
-                </p>
-
-                <div className="bg-white border border-sky-200 rounded-xl p-4 space-y-3.5">
-                  <div className="space-y-3 text-xs leading-relaxed text-slate-650 pl-0.5">
-                    {/* Step 1 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-sky-100 flex items-center justify-center text-[10px] font-bold text-sky-800 shrink-0 border border-sky-200 mt-0.5">1</div>
-                      <div>
-                        <strong>Keluar Sesi & Hubungkan Ulang (Disarankan):</strong> Klik tombol <strong className="text-rose-600">Putuskan Google Akun</strong> di kanan bawah, lalu klik <strong className="text-emerald-700">Hubungkan Google Akun</strong> untuk menyegarkan sesi perizinan Anda secara bersih.
-                      </div>
-                    </div>
-
-                    {/* Step 2 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-sky-100 flex items-center justify-center text-[10px] font-bold text-sky-800 shrink-0 border border-sky-200 mt-0.5">2</div>
-                      <div>
-                        <strong>Matikan Pemblokir Konten / Brave Shields:</strong> Beberapa pelindung privasi agresif (seperti Brave Shields atau ekstensi AdBlock) sering salah mengenali request Google OAuth/API sebagai iklan. Matikan sementara pelindung tersebut khusus untuk website ini.
-                      </div>
-                    </div>
-
-                    {/* Step 3 */}
-                    <div className="flex items-start gap-2.5">
-                      <div className="w-5 h-5 rounded-full bg-sky-100 flex items-center justify-center text-[10px] font-bold text-sky-800 shrink-0 border border-sky-200 mt-0.5">3</div>
-                      <div>
-                        <strong>Periksa Izin Spreadsheet:</strong> Pastikan spreadsheet tersebut tidak dalam kondisi pembatasan ketat privasi organisasi, atau coba buka kembali tabnya.
-                      </div>
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex items-center gap-1.5 text-[11px] text-sky-900 bg-sky-100/50 p-2.5 rounded-lg">
-                  <Sparkles className="w-3.5 h-3.5 text-sky-600 shrink-0" />
-                  <span><strong>Tip Cepat:</strong> Proses pemutusan sesi & penghubungan ulang hanya memakan waktu 5 detik dan efisien untuk menyinkronkan token secara otomatis!</span>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
