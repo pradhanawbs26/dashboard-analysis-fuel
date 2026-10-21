@@ -975,14 +975,14 @@ export default function YearlyReview({
         const allUnitAggregates: Record<string, { idAlat: string; egy: string; typeAlat: string; totalVolume: number; totalHours: number; count: number; detectedMonthFromDates: Record<string, number> }> = {};
         const parsedRawFuelRecords: FuelRecord[] = [];
 
-        // Find sheet "Issued" specifically if present
-        const issuedSheetName = workbook.SheetNames.find(
+        // Find all sheets related to transactions (Issued sheets or monthly transaction sheets)
+        const issuedSheets = workbook.SheetNames.filter(
           s => s.trim().toLowerCase() === "issued" || s.trim().toLowerCase().includes("issue")
         );
 
-        // Process ONLY the "Issued" sheet when available, or valid transaction sheets
-        const sheetsToProcess = issuedSheetName
-          ? [issuedSheetName]
+        // Process ALL issued sheets when available, or valid transaction sheets
+        const sheetsToProcess = issuedSheets.length > 0
+          ? issuedSheets
           : workbook.SheetNames.filter(s => {
               const lower = s.trim().toLowerCase();
               return !lower.includes("list") && !lower.includes("fc") && !lower.includes("legend") && !lower.includes("meta") && !lower.includes("pivot") && !lower.includes("chart") && !lower.includes("summary") && !lower.includes("rekap");
@@ -1025,131 +1025,131 @@ export default function YearlyReview({
             jam: isJuneOrLater ? 23 : 22                                // Column X or W
           };
 
+          // Universal dynamic header row and column scanner (scans up to 120 rows)
           let detectedHeaderRowIdx = -1;
+          let bestHeaderRowIdx = -1;
+          const scanRowsLimit = Math.min(rawRows.length, 120);
+          let maxMatches = 0;
+          let bestRowColMap = { ...colMap };
 
-          if (isIssuedSheet) {
-            // Header is around row 107-109, data strictly starts at row 110 (index 109)
-            detectedHeaderRowIdx = 108;
-          } else {
-            // Fallback parser dynamic scanner matching EXACT patterns in App.tsx
-            let bestHeaderRowIdx = -1;
-            const scanRowsLimit = Math.min(rawRows.length, 30);
-            let maxMatches = 0;
-            let bestRowColMap = { ...colMap };
-
-            for (let r = 0; r < scanRowsLimit; r++) {
-              const row = rawRows[r];
-              if (!row || !Array.isArray(row)) continue;
+          for (let r = 0; r < scanRowsLimit; r++) {
+            const row = rawRows[r];
+            if (!row || !Array.isArray(row)) continue;
+            
+            let matches = 0;
+            let tempMap = { ...colMap };
+            
+            row.forEach((cell, cIdx) => {
+              if (cell === undefined || cell === null) return;
+              const str = String(cell).toLowerCase().trim();
+              if (!str) return;
               
-              let matches = 0;
-              let tempMap = { ...colMap };
-              
-              row.forEach((cell, cIdx) => {
-                if (cell === undefined || cell === null) return;
-                const str = String(cell).toLowerCase().trim();
-                if (!str) return;
-                
-                if (str === "tanggal" || str === "tgl" || str === "date") {
-                  tempMap.tanggal = cIdx;
-                  matches++;
-                } else if (
-                  str === "tempat" || 
-                  str === "storage" || 
-                  str === "fuel storage" || 
-                  str === "lokasi" || 
-                  str === "gate" || 
-                  str.includes("storage") || 
-                  str.includes("tempat") || 
-                  str.includes("gate") ||
-                  str.includes("lokasi")
-                ) {
-                  tempMap.storage = cIdx;
-                  matches++;
-                } else if (
-                  str === "unit" || 
-                  str === "nomor unit" || 
-                  str === "no unit" || 
-                  str === "id alat" || 
-                  str === "id_alat" || 
-                  str === "unit id" || 
-                  str === "no. unit" || 
-                  str === "unit_id" || 
-                  str.includes("nomor unit") ||
-                  str === "no_unit"
-                ) {
-                  tempMap.idAlat = cIdx;
-                  matches++;
-                } else if (
-                  str === "kategori" || 
-                  str === "type" || 
-                  str === "type alat" || 
-                  str === "type alat berat" || 
-                  str === "jenis alat" || 
-                  str === "jenis" || 
-                  str === "type_alat" || 
-                  str === "type_alat_berat" ||
-                  str.includes("kategori") ||
-                  str.includes("type alat") ||
-                  str === "type alat berat / kategori"
-                ) {
-                  tempMap.typeAlat = cIdx;
-                  matches++;
-                } else if (
-                  str.includes("hm sebelum") || 
-                  str.includes("hm sblm") || 
-                  str.includes("hm awal") || 
-                  str.includes("previous hm") || 
-                  str.includes("prev hm") || 
-                  str === "hm_sebelumnya" ||
-                  str === "hm sbl"
-                ) {
-                  tempMap.hmSebelum = cIdx;
-                  matches++;
-                } else if (
-                  str.includes("hm saat ini") || 
-                  str.includes("hm sesudah") || 
-                  str.includes("hm akhir") || 
-                  str.includes("hm_saat_ini") || 
-                  str.includes("hm_sesudah") || 
-                  str.includes("hm sesdh") || 
-                  str.includes("hm kini") ||
-                  str === "hm ses" ||
-                  str === "hm_saat_ini"
-                ) {
-                  tempMap.hmSaatIni = cIdx;
-                  matches++;
-                } else if (
-                  str.includes("volume") || 
-                  str.includes("fuel") || 
-                  str.includes("liter") || 
-                  str === "vol_fuel" || 
-                  str === "qty" || 
-                  str === "vol" || 
-                  str === "volume fuel (liter)" ||
-                  str === "jumlah" ||
-                  str === "jumlah (liter)" ||
-                  str === "liter"
-                ) {
-                  tempMap.volumeFuel = cIdx;
-                  matches++;
-                }
-              });
-
-              if (matches > maxMatches) {
-                maxMatches = matches;
-                bestHeaderRowIdx = r;
-                bestRowColMap = tempMap;
+              if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
+                tempMap.tanggal = cIdx;
+                matches++;
+              } else if (
+                str === "tempat" || 
+                str === "storage" || 
+                str === "fuel storage" || 
+                str === "lokasi" || 
+                str === "gate" || 
+                str.includes("storage") || 
+                str.includes("tempat") || 
+                str.includes("gate") ||
+                str.includes("lokasi")
+              ) {
+                tempMap.storage = cIdx;
+                matches++;
+              } else if (
+                str === "unit" || 
+                str === "nomor unit" || 
+                str === "no unit" || 
+                str === "id alat" || 
+                str === "id_alat" || 
+                str === "unit id" || 
+                str === "no. unit" || 
+                str === "unit_id" || 
+                str.includes("nomor unit") ||
+                str === "no_unit" ||
+                str.includes("equipment")
+              ) {
+                tempMap.idAlat = cIdx;
+                matches++;
+              } else if (
+                str === "kategori" || 
+                str === "type" || 
+                str === "type alat" || 
+                str === "type alat berat" || 
+                str === "jenis alat" || 
+                str === "jenis" || 
+                str === "type_alat" || 
+                str === "type_alat_berat" ||
+                str.includes("kategori") ||
+                str.includes("type alat") ||
+                str === "type alat berat / kategori"
+              ) {
+                tempMap.typeAlat = cIdx;
+                matches++;
+              } else if (
+                str.includes("hm sebelum") || 
+                str.includes("hm sblm") || 
+                str.includes("hm awal") || 
+                str.includes("previous hm") || 
+                str.includes("prev hm") || 
+                str === "hm_sebelumnya" ||
+                str === "hm sbl"
+              ) {
+                tempMap.hmSebelum = cIdx;
+                matches++;
+              } else if (
+                str.includes("hm saat ini") || 
+                str.includes("hm sesudah") || 
+                str.includes("hm akhir") || 
+                str.includes("hm_saat_ini") || 
+                str.includes("hm_sesudah") || 
+                str.includes("hm sesdh") || 
+                str.includes("hm kini") ||
+                str === "hm ses" ||
+                str === "hm_saat_ini"
+              ) {
+                tempMap.hmSaatIni = cIdx;
+                matches++;
+              } else if (
+                str.includes("volume") || 
+                str.includes("fuel") || 
+                str.includes("liter") || 
+                str === "vol_fuel" || 
+                str === "qty" || 
+                str === "vol" || 
+                str === "volume fuel (liter)" ||
+                str === "jumlah" ||
+                str === "jumlah (liter)" ||
+                str === "liter"
+              ) {
+                tempMap.volumeFuel = cIdx;
+                matches++;
               }
-            }
+            });
 
-            if (maxMatches >= 2) {
-              colMap = bestRowColMap;
-              detectedHeaderRowIdx = bestHeaderRowIdx;
+            if (matches > maxMatches) {
+              maxMatches = matches;
+              bestHeaderRowIdx = r;
+              bestRowColMap = tempMap;
             }
           }
 
-          // Start reading sheet row by row: For "Issued" sheet, strictly start at row 110 (index 109)
-          const startIdx = isIssuedSheet ? 109 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
+          if (maxMatches >= 2) {
+            colMap = bestRowColMap;
+            detectedHeaderRowIdx = bestHeaderRowIdx;
+          }
+
+          // Start reading sheet row by row:
+          // If header row was detected, start immediately at detectedHeaderRowIdx + 1.
+          // Fallback to row 109 ONLY if isIssuedSheet and rawRows has > 115 rows and no earlier header was found.
+          const startIdx = detectedHeaderRowIdx !== -1 
+            ? detectedHeaderRowIdx + 1 
+            : (isIssuedSheet && rawRows.length > 115 ? 109 : 1);
+
           if (colMap.volumeFuel !== -1) {
             sheetsCountParsed++;
             // Aggregate values for this sheet by Egy Alat and Individual Unit
@@ -1169,18 +1169,18 @@ export default function YearlyReview({
               });
               if (isHeaderRow) continue;
 
-              // Extract vehicle ID strictly from Column I (index 8) as requested
+              // Extract vehicle ID prioritizing the detected column
               let idAlat = "";
-              if (row.length > 8 && row[8] !== undefined && row[8] !== null) {
-                const rawColI = String(row[8]).trim();
-                if (rawColI) {
-                  idAlat = rawColI.toUpperCase();
-                }
-              }
-              if (!idAlat && colMap.idAlat !== -1 && colMap.idAlat < row.length && row[colMap.idAlat] !== undefined && row[colMap.idAlat] !== null) {
+              if (colMap.idAlat !== -1 && colMap.idAlat < row.length && row[colMap.idAlat] !== undefined && row[colMap.idAlat] !== null) {
                 const rawId = String(row[colMap.idAlat]).trim();
                 if (rawId) {
                   idAlat = rawId.toUpperCase();
+                }
+              }
+              if (!idAlat && row.length > 8 && row[8] !== undefined && row[8] !== null) {
+                const rawColI = String(row[8]).trim();
+                if (rawColI) {
+                  idAlat = rawColI.toUpperCase();
                 }
               }
 
@@ -1638,17 +1638,44 @@ export default function YearlyReview({
 
       const allAffectedMonths = Array.from(new Set([...affectedMonths, ...logMonths, confirmedMonth]));
 
-      // Save each affected month to Cloud Firestore
+      // Prepare merged records across all months so they are completely persisted and available immediately
+      let mergedRecords: FuelRecord[] = [];
+      if (finalLogsToSync.length > 0) {
+        const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
+
+        // Filter out existing logs for affected months to prevent duplicate stacking
+        const existingFiltered = currentSavedRecords.filter(r => {
+          if (!r.tanggal) return true;
+          const norm = normalizeDateToYMD(r.tanggal) || r.tanggal;
+          return !allAffectedMonths.some(mName => {
+            const mIdx = getMonthFromText(mName);
+            const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
+            return mPad && norm.startsWith(`2026-${mPad}`);
+          });
+        });
+
+        mergedRecords = mergeWithYearlyRecords([...existingFiltered, ...finalLogsToSync]);
+        saveLocalData("fuel_records", mergedRecords);
+        if (onSyncRecords) {
+          onSyncRecords(mergedRecords, confirmedMonth);
+        }
+      }
+
+      // Save each affected month report and its records to Cloud Firestore
       for (const mName of allAffectedMonths) {
         const mIdx = getMonthFromText(mName);
         const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
 
-        // Extract transaction records specific to this month
-        const monthRecords = finalLogsToSync.filter(r => mPad && r.tanggal.startsWith(`2026-${mPad}`));
+        // Extract transaction records specific to this month from mergedRecords
+        const sourceForMonth = mergedRecords.length > 0 ? mergedRecords : finalLogsToSync;
+        const monthRecords = sourceForMonth.filter(r => {
+          const norm = normalizeDateToYMD(r.tanggal) || r.tanggal;
+          return mPad && norm.startsWith(`2026-${mPad}`);
+        });
         
         let monthEntries = aggregatedParsed.filter(p => p.bulan === mName);
         if (monthEntries.length === 0 && monthRecords.length > 0) {
-          // Compute type summaries on-the-fly for carried-over months (e.g. Sept 30 in Oct upload)
+          // Compute type summaries on-the-fly for carried-over months
           const typeAgg: Record<string, { vol: number; hrs: number; count: number }> = {};
           monthRecords.forEach(r => {
             const t = r.egy || deriveEgy(r.idAlat, r.typeAlat);
@@ -1761,34 +1788,29 @@ export default function YearlyReview({
       saveLocalData("yearly_data_points", nextPts);
       saveLocalData("yearly_uploaded_months", nextMonths);
 
-      // Merge raw transaction logs into global fuel_records so Monthly Review can analyze ANY and ALL months immediately
-      if (finalLogsToSync.length > 0) {
-        const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
-
-        // Filter out existing logs for affected months to prevent duplicate stacking
-        const existingFiltered = currentSavedRecords.filter(r => {
-          if (!r.tanggal) return true;
-          return !allAffectedMonths.some(mName => {
-            const mIdx = getMonthFromText(mName);
-            const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
-            return mPad && r.tanggal.startsWith(`2026-${mPad}`);
-          });
-        });
-
-        const mergedRecords = mergeWithYearlyRecords([...existingFiltered, ...finalLogsToSync]);
-        saveLocalData("fuel_records", mergedRecords);
-        if (onSyncRecords) {
-          onSyncRecords(mergedRecords, confirmedMonth);
+      // Persist the combined multi-month dataset directly into Firestore
+      if (mergedRecords.length > 0) {
+        const mIdx = getMonthFromText(confirmedMonth);
+        let activeStart = "2026-01-01";
+        let activeEnd = "2026-12-31";
+        if (mIdx !== -1) {
+          const mPad = String(mIdx + 1).padStart(2, "0");
+          const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
+          activeStart = `2026-${mPad}-01`;
+          activeEnd = `2026-${mPad}-${String(daysInMonth).padStart(2, "0")}`;
         }
 
-        // Persist the combined multi-month dataset directly into Firestore
-        saveActiveDatasetToFirestore({
-          records: mergedRecords,
-          plans: {},
-          startDate: "2026-01-01",
-          endDate: "2026-12-31",
-          fileName: stagingData.fileName
-        }).catch(cloudErr => console.warn("Firestore active dataset sync notice:", cloudErr));
+        try {
+          await saveActiveDatasetToFirestore({
+            records: mergedRecords,
+            plans: (propUnitPlans as any) || {},
+            startDate: activeStart,
+            endDate: activeEnd,
+            fileName: stagingData.fileName
+          });
+        } catch (cloudErr) {
+          console.warn("Firestore active dataset sync notice:", cloudErr);
+        }
       }
 
       // Auto-extend endEvalMonth if confirmedMonth is later than current endEvalMonth

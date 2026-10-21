@@ -217,40 +217,74 @@ export default function DailyReviewView({
   ];
 
   // Auto-find optimal initial date range based on actual records
+  const userChangedRangeRef = React.useRef(false);
+  const prevInitialRangeRef = React.useRef({ start: initialStartDate, end: initialEndDate });
+
+  // Auto-find optimal initial date range based on actual records
   const [startDate, setStartDate] = useState<string>(() => {
-    if (initialStartDate) return initialStartDate;
     // If records has data in any month, pick the month with highest records
     const monthsWithData = Array.from(availableMonthsInRecords.entries())
       .filter(([_, c]) => c > 0)
       .sort((a, b) => b[1] - a[1]);
+
+    if (initialStartDate) {
+      // Check if initialStartDate actually has records
+      const initYm = initialStartDate.substring(0, 7);
+      const countInInit = availableMonthsInRecords.get(initYm) || 0;
+      if (countInInit > 0 || monthsWithData.length === 0) {
+        return initialStartDate;
+      }
+    }
+
     if (monthsWithData.length > 0) {
       const topYm = monthsWithData[0][0];
       const preset = monthPresets.find(mp => mp.start.startsWith(topYm));
       if (preset) return preset.start;
     }
-    return minMaxDates.min;
+    return initialStartDate || minMaxDates.min;
   });
 
   const [endDate, setEndDate] = useState<string>(() => {
-    if (initialEndDate) return initialEndDate;
     const monthsWithData = Array.from(availableMonthsInRecords.entries())
       .filter(([_, c]) => c > 0)
       .sort((a, b) => b[1] - a[1]);
+
+    if (initialEndDate) {
+      const initYm = (initialStartDate || initialEndDate).substring(0, 7);
+      const countInInit = availableMonthsInRecords.get(initYm) || 0;
+      if (countInInit > 0 || monthsWithData.length === 0) {
+        return initialEndDate;
+      }
+    }
+
     if (monthsWithData.length > 0) {
       const topYm = monthsWithData[0][0];
       const preset = monthPresets.find(mp => mp.start.startsWith(topYm));
       if (preset) return preset.end;
     }
-    return minMaxDates.max;
+    return initialEndDate || minMaxDates.max;
   });
 
-  // Sync date when parent props change or when records are first populated from Firebase
+  // Sync date when parent props explicitly change or when records are first populated from Firebase
   React.useEffect(() => {
-    if (initialStartDate && initialEndDate) {
+    // If parent explicitly changed initial range, sync it
+    if (
+      initialStartDate && 
+      initialEndDate && 
+      (initialStartDate !== prevInitialRangeRef.current.start || initialEndDate !== prevInitialRangeRef.current.end)
+    ) {
+      prevInitialRangeRef.current = { start: initialStartDate, end: initialEndDate };
       setStartDate(initialStartDate);
       setEndDate(initialEndDate);
+      userChangedRangeRef.current = false;
       return;
     }
+
+    // If user has already explicitly picked a month/date in DailyReview, never overwrite it!
+    if (userChangedRangeRef.current) {
+      return;
+    }
+
     // If currently selected range has 0 data, auto-switch to month with actual records
     const currentYm = startDate.substring(0, 7);
     const countInCurrent = availableMonthsInRecords.get(currentYm) || 0;
@@ -267,7 +301,7 @@ export default function DailyReviewView({
         }
       }
     }
-  }, [initialStartDate, initialEndDate, records, availableMonthsInRecords]);
+  }, [initialStartDate, initialEndDate, records, availableMonthsInRecords, startDate]);
 
   // Accounting Mode: Default to "rollover_next_month" per mining operations requirement:
   // Pengisian tgl 1 Oktober diambil sebagai konsumsi akhir bulan tanggal 30 September
@@ -282,6 +316,7 @@ export default function DailyReviewView({
   }, [startDate, endDate, minMaxDates]);
 
   const handleMonthChange = (val: string) => {
+    userChangedRangeRef.current = true;
     if (val === "ALL") {
       setStartDate(minMaxDates.min);
       setEndDate(minMaxDates.max);
@@ -486,9 +521,32 @@ export default function DailyReviewView({
     };
   }, [records, selectedEgy, startDate, endDate, dateColumns, dateAccountingMode, unitPlans, egyPlans]);
 
+  // Toggle filter to only display active units (units with fuel or HM transactions in the selected period)
+  const [showOnlyActiveUnits, setShowOnlyActiveUnits] = useState(true);
+
+  // Compute displayed unit summaries and counts
+  const { displayedSummaries, activeUnitsCount, idleUnitsCount } = useMemo(() => {
+    const active = unitSummaries.filter(u => u.totalVolume > 0 || u.totalHm > 0 || u.anomaliesCount > 0);
+    const idle = unitSummaries.filter(u => u.totalVolume === 0 && u.totalHm === 0 && u.anomaliesCount === 0);
+
+    let list: UnitDailySummary[];
+    if (showOnlyActiveUnits) {
+      list = active.length > 0 ? active : unitSummaries;
+    } else {
+      // Put active units first, followed by idle units
+      list = [...active, ...idle];
+    }
+    return {
+      displayedSummaries: list,
+      activeUnitsCount: active.length,
+      idleUnitsCount: idle.length
+    };
+  }, [unitSummaries, showOnlyActiveUnits]);
+
   // Export Daily Review to Excel (Multi-Sheet: Fuel Burn, Volume Fuel, Hour Meter)
   const handleExportExcel = () => {
-    if (unitSummaries.length === 0) {
+    const exportList = showOnlyActiveUnits ? displayedSummaries : unitSummaries;
+    if (exportList.length === 0) {
       alert("Tidak ada data untuk diekspor pada filter ini.");
       return;
     }
@@ -506,12 +564,13 @@ export default function DailyReviewView({
       ["PILIHAN EGY", selectedEgy],
       ["PERIODE", `${startDate} s/d ${endDate}`],
       ["METODE TANGGAL", accountingModeLabel],
+      ["STATUS FILTER", showOnlyActiveUnits ? "Hanya Unit Aktif" : "Semua Unit"],
       [],
       ["FUEL BURN (LITER/HOUR)"],
       ["NOMOR UNIT", ...headersDate, "RATA-RATA (L/JAM)", "PLAN (L/JAM)", "STATUS"]
     ];
 
-    unitSummaries.forEach(u => {
+    exportList.forEach(u => {
       const rowVals: any[] = [u.idAlat];
       dateColumns.forEach(d => {
         const cell = u.dailyMap.get(d);
@@ -546,7 +605,7 @@ export default function DailyReviewView({
       ["NOMOR UNIT", ...headersDate, "TOTAL VOLUME (LITER)"]
     ];
 
-    unitSummaries.forEach(u => {
+    exportList.forEach(u => {
       const rowVals: any[] = [u.idAlat];
       dateColumns.forEach(d => {
         const cell = u.dailyMap.get(d);
@@ -568,12 +627,13 @@ export default function DailyReviewView({
       ["PILIHAN EGY", selectedEgy],
       ["PERIODE", `${startDate} s/d ${endDate}`],
       ["METODE TANGGAL", accountingModeLabel],
+      ["STATUS FILTER", showOnlyActiveUnits ? "Hanya Unit Aktif" : "Semua Unit"],
       [],
       ["HOUR METER (HOUR)"],
       ["NOMOR UNIT", ...headersDate, "TOTAL HM (JAM)", "CATATAN ANOMALI HM"]
     ];
 
-    unitSummaries.forEach(u => {
+    exportList.forEach(u => {
       const rowVals: any[] = [u.idAlat];
       const unitNotes: string[] = [];
 
@@ -786,10 +846,46 @@ export default function DailyReviewView({
 
         {/* Quick Info & Anomaly Counter Bar */}
         <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center justify-between gap-3 text-xs text-slate-600">
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-2.5">
             <span>
-              Menampilkan: <strong className="text-slate-900 font-bold">{unitSummaries.length} unit</strong> ({selectedEgy === "SEMUA" ? "Semua Egy" : selectedEgy})
+              Menampilkan: <strong className="text-slate-900 font-bold">{displayedSummaries.length} unit</strong> ({selectedEgy === "SEMUA" ? "Semua EGY" : selectedEgy})
             </span>
+            <span className="text-slate-300">•</span>
+
+            {/* Filter Toggle: Active Units vs All Units */}
+            <div className="inline-flex rounded-lg border border-slate-300 bg-slate-100 p-0.5 text-[11px] font-bold shadow-2xs">
+              <button
+                type="button"
+                onClick={() => setShowOnlyActiveUnits(true)}
+                className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                  showOnlyActiveUnits
+                    ? "bg-[#4682B4] text-white shadow-xs font-black"
+                    : "text-slate-600 hover:text-slate-950"
+                }`}
+                title="Hanya tampilkan unit yang beroperasi atau mengisi solar pada periode ini"
+              >
+                <span>⚡ Unit Aktif</span>
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${showOnlyActiveUnits ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"}`}>
+                  {activeUnitsCount}
+                </span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowOnlyActiveUnits(false)}
+                className={`px-2.5 py-1 rounded-md transition cursor-pointer flex items-center gap-1.5 ${
+                  !showOnlyActiveUnits
+                    ? "bg-slate-800 text-white shadow-xs font-black"
+                    : "text-slate-600 hover:text-slate-950"
+                }`}
+                title="Tampilkan seluruh unit armada termasuk unit yang tidak beroperasi di periode ini"
+              >
+                <span>Semua Unit</span>
+                <span className={`px-1.5 py-0.2 rounded text-[10px] font-mono ${!showOnlyActiveUnits ? "bg-white/20 text-white" : "bg-slate-200 text-slate-700"}`}>
+                  {unitSummaries.length}
+                </span>
+              </button>
+            </div>
+
             <span className="text-slate-300">•</span>
             <span>
               Total Hari: <strong className="text-slate-900 font-mono font-bold">{dateColumns.length} tanggal</strong>
@@ -894,17 +990,35 @@ export default function DailyReviewView({
         </div>
       </div>
 
-      {unitSummaries.length === 0 ? (
+      {displayedSummaries.length === 0 ? (
         <div className="bg-white rounded-2xl p-10 text-center border border-slate-200 shadow-xs space-y-4">
           <div className="w-12 h-12 rounded-full bg-blue-50 text-[#4682B4] flex items-center justify-center mx-auto border border-blue-100">
             <Info className="w-6 h-6" />
           </div>
           <div className="space-y-1">
-            <h3 className="text-base font-bold text-slate-800">Tidak Ada Data Transaksi untuk Filter Ini</h3>
+            <h3 className="text-base font-bold text-slate-800">
+              {unitSummaries.length > 0 && showOnlyActiveUnits 
+                ? "Tidak Ada Unit yang Aktif Beroperasi pada Periode Ini" 
+                : "Tidak Ada Data Transaksi untuk Filter Ini"}
+            </h3>
             <p className="text-xs text-slate-500 max-w-lg mx-auto">
-              Tidak ditemukan catatan bahan bakar untuk EGY <strong className="text-slate-700">"{selectedEgy}"</strong> pada rentang tanggal <strong className="text-slate-700">{startDate} s/d {endDate}</strong>.
+              {unitSummaries.length > 0 && showOnlyActiveUnits
+                ? `Terdapat ${unitSummaries.length} unit terdaftar untuk EGY "${selectedEgy}", namun seluruhnya tidak memiliki catatan pengisian fuel atau pergerakan HM pada rentang ${startDate} s/d ${endDate}.`
+                : `Tidak ditemukan catatan bahan bakar untuk EGY "${selectedEgy}" pada rentang tanggal ${startDate} s/d ${endDate}.`}
             </p>
           </div>
+
+          {unitSummaries.length > 0 && showOnlyActiveUnits && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowOnlyActiveUnits(false)}
+                className="px-4 py-2 bg-slate-800 hover:bg-slate-900 text-white rounded-xl text-xs font-bold transition cursor-pointer"
+              >
+                Tampilkan Semua Unit ({unitSummaries.length} Unit)
+              </button>
+            </div>
+          )}
 
           {/* Quick jump to months that have saved data */}
           {availableMonthsInRecords.size > 0 && (
@@ -1019,7 +1133,7 @@ export default function DailyReviewView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 font-mono">
-                  {unitSummaries.map((u) => {
+                  {displayedSummaries.map((u) => {
                     const isOverAverage = u.avgFuelBurn !== null && u.targetPlan > 0 && u.avgFuelBurn > u.targetPlan;
                     return (
                       <tr key={u.canonicalId} className="hover:bg-slate-50/80 transition-colors">
@@ -1141,7 +1255,7 @@ export default function DailyReviewView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 font-mono">
-                  {unitSummaries.map((u) => (
+                  {displayedSummaries.map((u) => (
                     <tr key={u.canonicalId} className="hover:bg-slate-50/80 transition-colors">
                       {/* Sticky Unit ID Column */}
                       <td className="sticky left-0 z-10 bg-slate-50 px-3.5 py-2 font-bold text-slate-900 border-r-2 border-slate-300 shadow-2xs whitespace-nowrap">
@@ -1231,7 +1345,7 @@ export default function DailyReviewView({
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-200 font-mono">
-                  {unitSummaries.map((u) => (
+                  {displayedSummaries.map((u) => (
                     <tr key={u.canonicalId} className="hover:bg-slate-50/80 transition-colors">
                       {/* Sticky Unit ID Column */}
                       <td className="sticky left-0 z-10 bg-slate-50 px-3.5 py-2 font-bold text-slate-900 border-r-2 border-slate-300 shadow-2xs whitespace-nowrap">

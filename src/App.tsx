@@ -403,12 +403,29 @@ export default function App() {
       }
 
       if (monthlyReports && monthlyReports.length > 0) {
-        const activeMonths = new Set(combinedRecords.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
         monthlyReports.forEach(rep => {
           if (rep.records && rep.records.length > 0) {
-            const firstDate = rep.records[0]?.tanggal;
-            const repMonth = firstDate ? (normalizeDateToYMD(firstDate) || firstDate).substring(0, 7) : null;
-            if (!repMonth || !activeMonths.has(repMonth)) {
+            const mPad = rep.monthIndex !== undefined && rep.monthIndex >= 0 ? String(rep.monthIndex + 1).padStart(2, "0") : "";
+            const repYm = mPad ? `2026-${mPad}` : null;
+            
+            const existingForMonth = repYm
+              ? combinedRecords.filter(r => {
+                  const ym = (normalizeDateToYMD(r.tanggal) || r.tanggal)?.substring(0, 7);
+                  return ym === repYm;
+                })
+              : [];
+
+            if (existingForMonth.length === 0) {
+              combinedRecords.push(...rep.records.map(r => ({
+                ...r,
+                tanggal: normalizeDateToYMD(r.tanggal) || r.tanggal,
+                jam: formatExcelTime(r.jam)
+              })));
+            } else if (rep.records.length > existingForMonth.length) {
+              combinedRecords = combinedRecords.filter(r => {
+                const ym = (normalizeDateToYMD(r.tanggal) || r.tanggal)?.substring(0, 7);
+                return ym !== repYm;
+              });
               combinedRecords.push(...rep.records.map(r => ({
                 ...r,
                 tanggal: normalizeDateToYMD(r.tanggal) || r.tanggal,
@@ -637,187 +654,161 @@ export default function App() {
         jam: 22                              // Column W (index 22)
       };
 
+      // Universal dynamic header row and column scanner (scans up to 120 rows)
       let detectedHeaderRowIdx = -1;
+      let bestHeaderRowIdx = -1;
+      const scanRowsLimit = Math.min(logRows.length, 120);
+      let maxMatches = 0;
+      let bestRowColMap = { ...colMap };
 
-      if (isIssuedSheet) {
-        let foundHeaderIdx = -1;
-        const scanRowsLimit = Math.min(logRows.length, 30);
-        for (let r = 0; r < scanRowsLimit; r++) {
-          const row = logRows[r];
-          if (!row || !Array.isArray(row)) continue;
-          let hits = 0;
-          row.forEach((cell) => {
-            if (cell === undefined || cell === null) return;
-            const str = String(cell).toLowerCase().trim();
-            if (
-              str.includes("tanggal") || 
-              str.includes("unit") || 
-              str === "kategori" || 
-              str.includes("hm") || 
-              str.includes("fuel") ||
-              str.includes("jam")
-            ) {
-              hits++;
-            }
-          });
-          if (hits >= 3) {
-            foundHeaderIdx = r;
-            break;
-          }
-        }
-        detectedHeaderRowIdx = foundHeaderIdx;
-      } else {
-        let bestHeaderRowIdx = -1;
-        const scanRowsLimit = Math.min(logRows.length, 30);
-        let maxMatches = 0;
-        let bestRowColMap = { ...colMap };
-
-        for (let r = 0; r < scanRowsLimit; r++) {
-          const row = logRows[r];
-          if (!row || !Array.isArray(row)) continue;
+      for (let r = 0; r < scanRowsLimit; r++) {
+        const row = logRows[r];
+        if (!row || !Array.isArray(row)) continue;
+        
+        let matches = 0;
+        let tempMap = { ...colMap };
+        
+        row.forEach((cell, cIdx) => {
+          if (cell === undefined || cell === null) return;
+          const str = String(cell).toLowerCase().trim();
+          if (!str) return;
           
-          let matches = 0;
-          let tempMap = { ...colMap };
-          
-          row.forEach((cell, cIdx) => {
-            if (cell === undefined || cell === null) return;
-            const str = String(cell).toLowerCase().trim();
-            if (!str) return;
-            
-            if (str === "tanggal" || str === "tgl" || str === "date") {
-              tempMap.tanggal = cIdx;
-              matches++;
-            } else if (
-              str === "tempat" || 
-              str === "storage" || 
-              str === "fuel storage" || 
-              str === "lokasi" || 
-              str === "gate" || 
-              str.includes("storage") || 
-              str.includes("tempat") || 
-              str.includes("gate") ||
-              str.includes("lokasi")
-            ) {
-              tempMap.storage = cIdx;
-              matches++;
-            } else if (
-              str === "unit" || 
-              str === "nomor unit" || 
-              str === "no unit" || 
-              str === "id alat" || 
-              str === "id_alat" || 
-              str === "unit id" || 
-              str === "no. unit" || 
-              str === "unit_id" || 
-              str.includes("nomor unit") ||
-              str === "no_unit"
-            ) {
-              tempMap.idAlat = cIdx;
-              matches++;
-            } else if (
-              str === "kategori" || 
-              str === "type" || 
-              str === "type alat" || 
-              str === "type alat berat" || 
-              str === "jenis alat" || 
-              str === "jenis" || 
-              str === "type_alat" || 
-              str === "type_alat_berat" ||
-              str.includes("kategori") ||
-              str.includes("type alat") ||
-              str === "type alat berat / kategori"
-            ) {
-              tempMap.typeAlat = cIdx;
-              matches++;
-            } else if (
-              str.includes("hm sebelum") || 
-              str.includes("hm sblm") || 
-              str.includes("hm awal") || 
-              str.includes("previous hm") || 
-              str.includes("prev hm") || 
-              str === "hm_sebelumnya" ||
-              str === "hm sbl"
-            ) {
-              tempMap.hmSebelum = cIdx;
-              matches++;
-            } else if (
-              str.includes("hm saat ini") || 
-              str.includes("hm sesudah") || 
-              str.includes("hm akhir") || 
-              str.includes("hm_saat_ini") || 
-              str.includes("hm_sesudah") || 
-              str.includes("hm sesdh") || 
-              str.includes("hm kini") ||
-              str === "hm ses" ||
-              str === "hm_saat_ini"
-            ) {
-              tempMap.hmSaatIni = cIdx;
-              matches++;
-            } else if (
-              str.includes("volume") || 
-              str.includes("fuel") || 
-              str.includes("liter") || 
-              str === "vol_fuel" || 
-              str === "qty" || 
-              str === "vol" || 
-              str === "volume fuel (liter)" ||
-              str === "jumlah" ||
-              str === "jumlah (liter)" ||
-              str === "liter"
-            ) {
-              tempMap.volumeFuel = cIdx;
-              matches++;
-            } else if (
-              str === "operator" || 
-              str === "nama operator" || 
-              str === "driver" ||
-              str.includes("operator") ||
-              str.includes("driver")
-            ) {
-              tempMap.operator = cIdx;
-              matches++;
-            } else if (
-              str === "fuelman" || 
-              str === "pengisi" || 
-              str === "petugas" || 
-              str === "nama fuelman" ||
-              str.includes("fuelman")
-            ) {
-              tempMap.fuelman = cIdx;
-              matches++;
-            } else if (
-              str === "shift" || 
-              str.includes("group") ||
-              str === "regu"
-            ) {
-              tempMap.shift = cIdx;
-              matches++;
-            } else if (
-              str === "jam" || 
-              str === "waktu" || 
-              str.includes("jam pengisian") || 
-              str.includes("time") || 
-              str === "jam pengisian fuel"
-            ) {
-              tempMap.jam = cIdx;
-              matches++;
-            }
-          });
-
-          if (matches > maxMatches) {
-            maxMatches = matches;
-            bestHeaderRowIdx = r;
-            bestRowColMap = tempMap;
+          if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
+            tempMap.tanggal = cIdx;
+            matches++;
+          } else if (
+            str === "tempat" || 
+            str === "storage" || 
+            str === "fuel storage" || 
+            str === "lokasi" || 
+            str === "gate" || 
+            str.includes("storage") || 
+            str.includes("tempat") || 
+            str.includes("gate") ||
+            str.includes("lokasi")
+          ) {
+            tempMap.storage = cIdx;
+            matches++;
+          } else if (
+            str === "unit" || 
+            str === "nomor unit" || 
+            str === "no unit" || 
+            str === "id alat" || 
+            str === "id_alat" || 
+            str === "unit id" || 
+            str === "no. unit" || 
+            str === "unit_id" || 
+            str.includes("nomor unit") ||
+            str === "no_unit" ||
+            str.includes("equipment")
+          ) {
+            tempMap.idAlat = cIdx;
+            matches++;
+          } else if (
+            str === "kategori" || 
+            str === "type" || 
+            str === "type alat" || 
+            str === "type alat berat" || 
+            str === "jenis alat" || 
+            str === "jenis" || 
+            str === "type_alat" || 
+            str === "type_alat_berat" ||
+            str.includes("kategori") ||
+            str.includes("type alat") ||
+            str === "type alat berat / kategori"
+          ) {
+            tempMap.typeAlat = cIdx;
+            matches++;
+          } else if (
+            str.includes("hm sebelum") || 
+            str.includes("hm sblm") || 
+            str.includes("hm awal") || 
+            str.includes("previous hm") || 
+            str.includes("prev hm") || 
+            str === "hm_sebelumnya" ||
+            str === "hm sbl"
+          ) {
+            tempMap.hmSebelum = cIdx;
+            matches++;
+          } else if (
+            str.includes("hm saat ini") || 
+            str.includes("hm sesudah") || 
+            str.includes("hm akhir") || 
+            str.includes("hm_saat_ini") || 
+            str.includes("hm_sesudah") || 
+            str.includes("hm sesdh") || 
+            str.includes("hm kini") ||
+            str === "hm ses" ||
+            str === "hm_saat_ini"
+          ) {
+            tempMap.hmSaatIni = cIdx;
+            matches++;
+          } else if (
+            str.includes("volume") || 
+            str.includes("fuel") || 
+            str.includes("liter") || 
+            str === "vol_fuel" || 
+            str === "qty" || 
+            str === "vol" || 
+            str === "volume fuel (liter)" ||
+            str === "jumlah" ||
+            str === "jumlah (liter)" ||
+            str === "liter"
+          ) {
+            tempMap.volumeFuel = cIdx;
+            matches++;
+          } else if (
+            str === "operator" || 
+            str === "nama operator" || 
+            str === "driver" ||
+            str.includes("operator") ||
+            str.includes("driver")
+          ) {
+            tempMap.operator = cIdx;
+            matches++;
+          } else if (
+            str === "fuelman" || 
+            str === "pengisi" || 
+            str === "petugas" || 
+            str === "nama fuelman" ||
+            str.includes("fuelman")
+          ) {
+            tempMap.fuelman = cIdx;
+            matches++;
+          } else if (
+            str === "shift" || 
+            str.includes("group") ||
+            str === "regu"
+          ) {
+            tempMap.shift = cIdx;
+            matches++;
+          } else if (
+            str === "jam" || 
+            str === "waktu" || 
+            str.includes("jam pengisian") || 
+            str.includes("time") || 
+            str === "jam pengisian fuel"
+          ) {
+            tempMap.jam = cIdx;
+            matches++;
           }
-        }
+        });
 
-        if (maxMatches >= 2) {
-          colMap = bestRowColMap;
-          detectedHeaderRowIdx = bestHeaderRowIdx;
+        if (matches > maxMatches) {
+          maxMatches = matches;
+          bestHeaderRowIdx = r;
+          bestRowColMap = tempMap;
         }
       }
 
-      const startRowIndex = isIssuedSheet ? 108 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
+      if (maxMatches >= 2) {
+        colMap = bestRowColMap;
+        detectedHeaderRowIdx = bestHeaderRowIdx;
+      }
+
+      const startRowIndex = detectedHeaderRowIdx !== -1 
+        ? detectedHeaderRowIdx + 1 
+        : (isIssuedSheet && logRows.length > 115 ? 109 : 1);
       const parsed: FuelRecord[] = [];
 
       logRows.forEach((row, index) => {
@@ -1443,190 +1434,161 @@ export default function App() {
           jam: 22                              // Column W (index 22)
         };
 
+        // Universal dynamic header row and column scanner (scans up to 120 rows)
         let detectedHeaderRowIdx = -1;
+        let bestHeaderRowIdx = -1;
+        const scanRowsLimit = Math.min(rawJson.length, 120);
+        let maxMatches = 0;
+        let bestRowColMap = { ...colMap };
 
-        if (isIssuedSheet) {
-          // Strictly lock indices for "Issued" sheet to prevent any header-scanning mismatch or overlaps!
-          // We only need to find the header row index to skip the metadata headings properly.
-          let foundHeaderIdx = -1;
-          const scanRowsLimit = Math.min(rawJson.length, 30);
-          for (let r = 0; r < scanRowsLimit; r++) {
-            const row = rawJson[r];
-            if (!row || !Array.isArray(row)) continue;
-            let hits = 0;
-            row.forEach((cell) => {
-              if (cell === undefined || cell === null) return;
-              const str = String(cell).toLowerCase().trim();
-              if (
-                str.includes("tanggal") || 
-                str.includes("unit") || 
-                str === "kategori" || 
-                str.includes("hm") || 
-                str.includes("fuel") ||
-                str.includes("jam")
-              ) {
-                hits++;
-              }
-            });
-            if (hits >= 3) {
-              foundHeaderIdx = r;
-              break;
-            }
-          }
-          detectedHeaderRowIdx = foundHeaderIdx;
-        } else {
-          // Fallback parser dynamic scanner for any other formats
-          let bestHeaderRowIdx = -1;
-          const scanRowsLimit = Math.min(rawJson.length, 30);
-          let maxMatches = 0;
-          let bestRowColMap = { ...colMap };
-
-          for (let r = 0; r < scanRowsLimit; r++) {
-            const row = rawJson[r];
-            if (!row || !Array.isArray(row)) continue;
+        for (let r = 0; r < scanRowsLimit; r++) {
+          const row = rawJson[r];
+          if (!row || !Array.isArray(row)) continue;
+          
+          let matches = 0;
+          let tempMap = { ...colMap };
+          
+          row.forEach((cell, cIdx) => {
+            if (cell === undefined || cell === null) return;
+            const str = String(cell).toLowerCase().trim();
+            if (!str) return;
             
-            let matches = 0;
-            let tempMap = { ...colMap };
-            
-            row.forEach((cell, cIdx) => {
-              if (cell === undefined || cell === null) return;
-              const str = String(cell).toLowerCase().trim();
-              if (!str) return;
-              
-              if (str === "tanggal" || str === "tgl" || str === "date") {
-                tempMap.tanggal = cIdx;
-                matches++;
-              } else if (
-                str === "tempat" || 
-                str === "storage" || 
-                str === "fuel storage" || 
-                str === "lokasi" || 
-                str === "gate" || 
-                str.includes("storage") || 
-                str.includes("tempat") || 
-                str.includes("gate") ||
-                str.includes("lokasi")
-              ) {
-                tempMap.storage = cIdx;
-                matches++;
-              } else if (
-                str === "unit" || 
-                str === "nomor unit" || 
-                str === "no unit" || 
-                str === "id alat" || 
-                str === "id_alat" || 
-                str === "unit id" || 
-                str === "no. unit" || 
-                str === "unit_id" || 
-                str.includes("nomor unit") ||
-                str === "no_unit"
-              ) {
-                tempMap.idAlat = cIdx;
-                matches++;
-              } else if (
-                str === "kategori" || 
-                str === "type" || 
-                str === "type alat" || 
-                str === "type alat berat" || 
-                str === "jenis alat" || 
-                str === "jenis" || 
-                str === "type_alat" || 
-                str === "type_alat_berat" ||
-                str.includes("kategori") ||
-                str.includes("type alat") ||
-                str === "type alat berat / kategori"
-              ) {
-                tempMap.typeAlat = cIdx;
-                matches++;
-              } else if (
-                str.includes("hm sebelum") || 
-                str.includes("hm sblm") || 
-                str.includes("hm awal") || 
-                str.includes("previous hm") || 
-                str.includes("prev hm") || 
-                str === "hm_sebelumnya" ||
-                str === "hm sbl"
-              ) {
-                tempMap.hmSebelum = cIdx;
-                matches++;
-              } else if (
-                str.includes("hm saat ini") || 
-                str.includes("hm sesudah") || 
-                str.includes("hm akhir") || 
-                str.includes("hm_saat_ini") || 
-                str.includes("hm_sesudah") || 
-                str.includes("hm sesdh") || 
-                str.includes("hm kini") ||
-                str === "hm ses" ||
-                str === "hm_saat_ini"
-              ) {
-                tempMap.hmSaatIni = cIdx;
-                matches++;
-              } else if (
-                str.includes("volume") || 
-                str.includes("fuel") || 
-                str.includes("liter") || 
-                str === "vol_fuel" || 
-                str === "qty" || 
-                str === "vol" || 
-                str === "volume fuel (liter)" ||
-                str === "jumlah" ||
-                str === "jumlah (liter)" ||
-                str === "liter"
-              ) {
-                tempMap.volumeFuel = cIdx;
-                matches++;
-              } else if (
-                str === "operator" || 
-                str === "nama operator" || 
-                str === "driver" ||
-                str.includes("operator") ||
-                str.includes("driver")
-              ) {
-                tempMap.operator = cIdx;
-                matches++;
-              } else if (
-                str === "fuelman" || 
-                str === "pengisi" || 
-                str === "petugas" || 
-                str === "nama fuelman" ||
-                str.includes("fuelman")
-              ) {
-                tempMap.fuelman = cIdx;
-                matches++;
-              } else if (
-                str === "shift" || 
-                str.includes("group") ||
-                str === "regu"
-              ) {
-                tempMap.shift = cIdx;
-                matches++;
-              } else if (
-                str === "jam" || 
-                str === "waktu" || 
-                str.includes("jam pengisian") || 
-                str.includes("time") || 
-                str === "jam pengisian fuel"
-              ) {
-                tempMap.jam = cIdx;
-                matches++;
-              }
-            });
-
-            if (matches > maxMatches) {
-              maxMatches = matches;
-              bestHeaderRowIdx = r;
-              bestRowColMap = tempMap;
+            if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
+              tempMap.tanggal = cIdx;
+              matches++;
+            } else if (
+              str === "tempat" || 
+              str === "storage" || 
+              str === "fuel storage" || 
+              str === "lokasi" || 
+              str === "gate" || 
+              str.includes("storage") || 
+              str.includes("tempat") || 
+              str.includes("gate") ||
+              str.includes("lokasi")
+            ) {
+              tempMap.storage = cIdx;
+              matches++;
+            } else if (
+              str === "unit" || 
+              str === "nomor unit" || 
+              str === "no unit" || 
+              str === "id alat" || 
+              str === "id_alat" || 
+              str === "unit id" || 
+              str === "no. unit" || 
+              str === "unit_id" || 
+              str.includes("nomor unit") ||
+              str === "no_unit" ||
+              str.includes("equipment")
+            ) {
+              tempMap.idAlat = cIdx;
+              matches++;
+            } else if (
+              str === "kategori" || 
+              str === "type" || 
+              str === "type alat" || 
+              str === "type alat berat" || 
+              str === "jenis alat" || 
+              str === "jenis" || 
+              str === "type_alat" || 
+              str === "type_alat_berat" ||
+              str.includes("kategori") ||
+              str.includes("type alat") ||
+              str === "type alat berat / kategori"
+            ) {
+              tempMap.typeAlat = cIdx;
+              matches++;
+            } else if (
+              str.includes("hm sebelum") || 
+              str.includes("hm sblm") || 
+              str.includes("hm awal") || 
+              str.includes("previous hm") || 
+              str.includes("prev hm") || 
+              str === "hm_sebelumnya" ||
+              str === "hm sbl"
+            ) {
+              tempMap.hmSebelum = cIdx;
+              matches++;
+            } else if (
+              str.includes("hm saat ini") || 
+              str.includes("hm sesudah") || 
+              str.includes("hm akhir") || 
+              str.includes("hm_saat_ini") || 
+              str.includes("hm_sesudah") || 
+              str.includes("hm sesdh") || 
+              str.includes("hm kini") ||
+              str === "hm ses" ||
+              str === "hm_saat_ini"
+            ) {
+              tempMap.hmSaatIni = cIdx;
+              matches++;
+            } else if (
+              str.includes("volume") || 
+              str.includes("fuel") || 
+              str.includes("liter") || 
+              str === "vol_fuel" || 
+              str === "qty" || 
+              str === "vol" || 
+              str === "volume fuel (liter)" ||
+              str === "jumlah" ||
+              str === "jumlah (liter)" ||
+              str === "liter"
+            ) {
+              tempMap.volumeFuel = cIdx;
+              matches++;
+            } else if (
+              str === "operator" || 
+              str === "nama operator" || 
+              str === "driver" ||
+              str.includes("operator") ||
+              str.includes("driver")
+            ) {
+              tempMap.operator = cIdx;
+              matches++;
+            } else if (
+              str === "fuelman" || 
+              str === "pengisi" || 
+              str === "petugas" || 
+              str === "nama fuelman" ||
+              str.includes("fuelman")
+            ) {
+              tempMap.fuelman = cIdx;
+              matches++;
+            } else if (
+              str === "shift" || 
+              str.includes("group") ||
+              str === "regu"
+            ) {
+              tempMap.shift = cIdx;
+              matches++;
+            } else if (
+              str === "jam" || 
+              str === "waktu" || 
+              str.includes("jam pengisian") || 
+              str.includes("time") || 
+              str === "jam pengisian fuel"
+            ) {
+              tempMap.jam = cIdx;
+              matches++;
             }
-          }
+          });
 
-          if (maxMatches >= 2) {
-            colMap = bestRowColMap;
-            detectedHeaderRowIdx = bestHeaderRowIdx;
+          if (matches > maxMatches) {
+            maxMatches = matches;
+            bestHeaderRowIdx = r;
+            bestRowColMap = tempMap;
           }
         }
 
-        const startRowIndex = isIssuedSheet ? 109 : (detectedHeaderRowIdx !== -1 ? detectedHeaderRowIdx + 1 : 0);
+        if (maxMatches >= 2) {
+          colMap = bestRowColMap;
+          detectedHeaderRowIdx = bestHeaderRowIdx;
+        }
+
+        const startRowIndex = detectedHeaderRowIdx !== -1 
+          ? detectedHeaderRowIdx + 1 
+          : (isIssuedSheet && rawJson.length > 115 ? 109 : 1);
         const parsed: FuelRecord[] = [];
 
         rawJson.forEach((row, index) => {
