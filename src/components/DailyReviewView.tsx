@@ -13,12 +13,15 @@ import {
   Clock,
   ChevronRight,
   ChevronDown,
-  ArrowUpDown
+  ArrowUpDown,
+  RefreshCw,
+  Cloud,
+  Database
 } from "lucide-react";
 import * as XLSX from "xlsx";
 import { FuelRecord, EgyPlanMap } from "../types";
 import { resolvePlanForUnit } from "../lib/egyPlanService";
-import { getCanonicalUnitId, deriveEgy, cleanEgyName } from "../data/sampleData";
+import { getCanonicalUnitId, deriveEgy, cleanEgyName, normalizeDateToYMD } from "../data/sampleData";
 
 interface DailyReviewViewProps {
   records: FuelRecord[];
@@ -27,6 +30,15 @@ interface DailyReviewViewProps {
   initialEgy?: string;
   egyPlans: EgyPlanMap;
   unitPlans?: Record<string, { idAlat: string; egy?: string; typeAlat: string; planFuelBurn: number }>;
+  firestoreSyncStatus?: {
+    isSynced: boolean;
+    isLoading: boolean;
+    lastUpdated?: string;
+    recordCount?: number;
+    fileName?: string;
+    uploadedBy?: string;
+  };
+  onReloadFirestore?: () => void;
 }
 
 /**
@@ -138,7 +150,9 @@ export default function DailyReviewView({
   initialEndDate = "",
   initialEgy = "SEMUA",
   egyPlans,
-  unitPlans
+  unitPlans,
+  firestoreSyncStatus,
+  onReloadFirestore
 }: DailyReviewViewProps) {
   // Available EGYs from records
   const availableEgys = useMemo(() => {
@@ -150,20 +164,34 @@ export default function DailyReviewView({
     return Array.from(set).sort();
   }, [records]);
 
-  // Filters State
+  // Filters State: Default to "SEMUA" so no unit is excluded on initial view
   const [selectedEgy, setSelectedEgy] = useState<string>(() => {
     if (initialEgy && initialEgy !== "SEMUA") return cleanEgyName(initialEgy);
-    // Prioritize Flat Deck if available like in the user's uploaded sample
-    if (availableEgys.includes("Flat Deck")) return "Flat Deck";
-    return availableEgys[0] || "SEMUA";
+    return "SEMUA";
   });
+
+  // Calculate actual record count available per month
+  const availableMonthsInRecords = useMemo(() => {
+    const map = new Map<string, number>();
+    records.forEach(r => {
+      const d = normalizeDateToYMD(r.tanggal) || r.tanggal;
+      if (d && d.length >= 7) {
+        const ym = d.substring(0, 7);
+        map.set(ym, (map.get(ym) || 0) + 1);
+      }
+    });
+    return map;
+  }, [records]);
 
   // Determine min & max available date
   const minMaxDates = useMemo(() => {
     let min = "2026-08-01";
     let max = "2026-08-31";
     if (records.length > 0) {
-      const sorted = [...records].map(r => r.tanggal).filter(Boolean).sort();
+      const sorted = [...records]
+        .map(r => normalizeDateToYMD(r.tanggal) || r.tanggal)
+        .filter(Boolean)
+        .sort();
       if (sorted.length > 0) {
         min = sorted[0];
         max = sorted[sorted.length - 1];
@@ -171,19 +199,6 @@ export default function DailyReviewView({
     }
     return { min, max };
   }, [records]);
-
-  const [startDate, setStartDate] = useState<string>(() => initialStartDate || minMaxDates.min);
-  const [endDate, setEndDate] = useState<string>(() => initialEndDate || minMaxDates.max);
-
-  // Sync date when parent props change
-  React.useEffect(() => {
-    if (initialStartDate) setStartDate(initialStartDate);
-    if (initialEndDate) setEndDate(initialEndDate);
-  }, [initialStartDate, initialEndDate]);
-
-  // Accounting Mode: Default to "rollover_next_month" per mining operations requirement:
-  // Pengisian tgl 1 Oktober diambil sebagai konsumsi akhir bulan tanggal 30 September
-  const [dateAccountingMode, setDateAccountingMode] = useState<DateAccountingMode>("rollover_next_month");
 
   // Quick Month Presets (Lengkap 12 Bulan Januari s/d Desember 2026)
   const monthPresets = [
@@ -200,6 +215,63 @@ export default function DailyReviewView({
     { label: "Nov", fullLabel: "November 2026", start: "2026-11-01", end: "2026-11-30" },
     { label: "Des", fullLabel: "Desember 2026", start: "2026-12-01", end: "2026-12-31" },
   ];
+
+  // Auto-find optimal initial date range based on actual records
+  const [startDate, setStartDate] = useState<string>(() => {
+    if (initialStartDate) return initialStartDate;
+    // If records has data in any month, pick the month with highest records
+    const monthsWithData = Array.from(availableMonthsInRecords.entries())
+      .filter(([_, c]) => c > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (monthsWithData.length > 0) {
+      const topYm = monthsWithData[0][0];
+      const preset = monthPresets.find(mp => mp.start.startsWith(topYm));
+      if (preset) return preset.start;
+    }
+    return minMaxDates.min;
+  });
+
+  const [endDate, setEndDate] = useState<string>(() => {
+    if (initialEndDate) return initialEndDate;
+    const monthsWithData = Array.from(availableMonthsInRecords.entries())
+      .filter(([_, c]) => c > 0)
+      .sort((a, b) => b[1] - a[1]);
+    if (monthsWithData.length > 0) {
+      const topYm = monthsWithData[0][0];
+      const preset = monthPresets.find(mp => mp.start.startsWith(topYm));
+      if (preset) return preset.end;
+    }
+    return minMaxDates.max;
+  });
+
+  // Sync date when parent props change or when records are first populated from Firebase
+  React.useEffect(() => {
+    if (initialStartDate && initialEndDate) {
+      setStartDate(initialStartDate);
+      setEndDate(initialEndDate);
+      return;
+    }
+    // If currently selected range has 0 data, auto-switch to month with actual records
+    const currentYm = startDate.substring(0, 7);
+    const countInCurrent = availableMonthsInRecords.get(currentYm) || 0;
+    if (countInCurrent === 0 && availableMonthsInRecords.size > 0) {
+      const monthsWithData = Array.from(availableMonthsInRecords.entries())
+        .filter(([_, c]) => c > 0)
+        .sort((a, b) => b[1] - a[1]);
+      if (monthsWithData.length > 0) {
+        const topYm = monthsWithData[0][0];
+        const preset = monthPresets.find(mp => mp.start.startsWith(topYm));
+        if (preset) {
+          setStartDate(preset.start);
+          setEndDate(preset.end);
+        }
+      }
+    }
+  }, [initialStartDate, initialEndDate, records, availableMonthsInRecords]);
+
+  // Accounting Mode: Default to "rollover_next_month" per mining operations requirement:
+  // Pengisian tgl 1 Oktober diambil sebagai konsumsi akhir bulan tanggal 30 September
+  const [dateAccountingMode, setDateAccountingMode] = useState<DateAccountingMode>("rollover_next_month");
 
   // Derived active selected month in dropdown selector
   const activeMonthSelectValue = useMemo(() => {
@@ -287,18 +359,19 @@ export default function DailyReviewView({
       unitRecs.forEach(r => {
         if (!r.tanggal) return;
         
-        // Determine the target date based on accounting mode
-        let targetDate = r.tanggal;
+        // Determine the target date based on accounting mode (guarantee clean YYYY-MM-DD format)
+        const cleanDate = normalizeDateToYMD(r.tanggal) || r.tanggal;
+        let targetDate = cleanDate;
         let isRolloverApplied = false;
         
         if (dateAccountingMode === "full_to_full") {
-          targetDate = getPreviousDay(r.tanggal);
+          targetDate = getPreviousDay(cleanDate);
         } else if (dateAccountingMode === "rollover_next_month") {
           // If transaction is logged on the 1st of a month (e.g. 2026-10-01),
           // and the reviewed period includes the last day of the previous month (e.g. 2026-09-30),
           // map this record as the operational consumption of the month's final day!
-          if (r.tanggal.endsWith("-01")) {
-            const prevDay = getPreviousDay(r.tanggal);
+          if (cleanDate.endsWith("-01")) {
+            const prevDay = getPreviousDay(cleanDate);
             if (dailyMap.has(prevDay)) {
               targetDate = prevDay;
               isRolloverApplied = true;
@@ -582,11 +655,15 @@ export default function DailyReviewView({
                   className="text-xs font-bold border border-slate-300 rounded-lg pl-3 pr-8 py-2 bg-slate-50 text-slate-900 focus:border-[#4682B4] focus:outline-none cursor-pointer shadow-2xs appearance-none min-w-[200px]"
                 >
                   <optgroup label="Bulan Tahun 2026">
-                    {monthPresets.map(mp => (
-                      <option key={mp.start} value={mp.start}>
-                        {mp.fullLabel}
-                      </option>
-                    ))}
+                    {monthPresets.map(mp => {
+                      const ym = mp.start.substring(0, 7);
+                      const count = availableMonthsInRecords.get(ym) || 0;
+                      return (
+                        <option key={mp.start} value={mp.start}>
+                          {mp.fullLabel} {count > 0 ? `(${count.toLocaleString()} data)` : `(0 data)`}
+                        </option>
+                      );
+                    })}
                   </optgroup>
                   <optgroup label="Pilihan Lain">
                     <option value="ALL">Semua Periode Data</option>
@@ -679,8 +756,20 @@ export default function DailyReviewView({
 
           </div>
 
-          {/* EXCEL EXPORT BUTTON (MULTI-SHEET) */}
+          {/* ACTION BUTTONS (EXCEL EXPORT & FIRESTORE SYNC) */}
           <div className="flex items-center gap-2 self-end lg:self-center">
+            {onReloadFirestore && (
+              <button
+                type="button"
+                onClick={onReloadFirestore}
+                disabled={firestoreSyncStatus?.isLoading}
+                className="flex items-center gap-1.5 px-3 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl font-bold text-xs border border-slate-300 transition cursor-pointer active:scale-95 disabled:opacity-50"
+                title="Muat ulang data bahan bakar langsung dari Cloud Firestore"
+              >
+                <RefreshCw className={`w-3.5 h-3.5 text-blue-600 ${firestoreSyncStatus?.isLoading ? "animate-spin" : ""}`} />
+                <span className="hidden sm:inline">{firestoreSyncStatus?.isLoading ? "Sinkronisasi..." : "Muat Firebase"}</span>
+              </button>
+            )}
             <button
               type="button"
               onClick={handleExportExcel}
@@ -806,12 +895,70 @@ export default function DailyReviewView({
       </div>
 
       {unitSummaries.length === 0 ? (
-        <div className="bg-white rounded-2xl p-12 text-center border border-slate-200 shadow-xs space-y-3">
-          <Info className="w-10 h-10 text-slate-400 mx-auto" />
-          <h3 className="text-base font-bold text-slate-800">Tidak Ada Data Ditemukan</h3>
-          <p className="text-xs text-slate-500 max-w-md mx-auto">
-            Tidak ada unit atau catatan bahan bakar untuk kategori EGY <strong>"{selectedEgy}"</strong> pada rentang tanggal terpilih. Silakan ubah filter EGY atau periode waktu di atas.
-          </p>
+        <div className="bg-white rounded-2xl p-10 text-center border border-slate-200 shadow-xs space-y-4">
+          <div className="w-12 h-12 rounded-full bg-blue-50 text-[#4682B4] flex items-center justify-center mx-auto border border-blue-100">
+            <Info className="w-6 h-6" />
+          </div>
+          <div className="space-y-1">
+            <h3 className="text-base font-bold text-slate-800">Tidak Ada Data Transaksi untuk Filter Ini</h3>
+            <p className="text-xs text-slate-500 max-w-lg mx-auto">
+              Tidak ditemukan catatan bahan bakar untuk EGY <strong className="text-slate-700">"{selectedEgy}"</strong> pada rentang tanggal <strong className="text-slate-700">{startDate} s/d {endDate}</strong>.
+            </p>
+          </div>
+
+          {/* Quick jump to months that have saved data */}
+          {availableMonthsInRecords.size > 0 && (
+            <div className="pt-2 max-w-lg mx-auto">
+              <p className="text-xs font-bold text-slate-700 mb-2">Bulan dengan data transaksi tersimpan:</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {Array.from(availableMonthsInRecords.entries())
+                  .filter(([_, count]) => count > 0)
+                  .map(([ym, count]) => {
+                    const preset = monthPresets.find(mp => mp.start.startsWith(ym));
+                    return (
+                      <button
+                        key={ym}
+                        type="button"
+                        onClick={() => {
+                          if (preset) {
+                            setStartDate(preset.start);
+                            setEndDate(preset.end);
+                          }
+                          setSelectedEgy("SEMUA");
+                        }}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-[#4682B4] border border-blue-200 rounded-lg text-xs font-bold transition cursor-pointer flex items-center gap-1.5"
+                      >
+                        <Calendar className="w-3.5 h-3.5" />
+                        <span>{preset?.fullLabel || ym} ({count.toLocaleString()} data)</span>
+                      </button>
+                    );
+                  })}
+              </div>
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
+            {selectedEgy !== "SEMUA" && (
+              <button
+                type="button"
+                onClick={() => setSelectedEgy("SEMUA")}
+                className="px-4 py-2 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-1.5"
+              >
+                <span>Tampilkan Semua Kategori EGY</span>
+              </button>
+            )}
+
+            {onReloadFirestore && (
+              <button
+                type="button"
+                onClick={onReloadFirestore}
+                className="px-4 py-2 bg-slate-900 hover:bg-slate-800 text-white rounded-xl text-xs font-bold transition cursor-pointer inline-flex items-center gap-2"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Muat Ulang dari Cloud Firestore</span>
+              </button>
+            )}
+          </div>
         </div>
       ) : (
         <div className="space-y-8">

@@ -60,6 +60,7 @@ import {
   saveMonthlyReportToFirestore, 
   saveActiveDatasetToFirestore, 
   fetchActiveDatasetFromFirestore, 
+  fetchAllMonthlyReports,
   subscribeToActiveDataset, 
   subscribeToMonthlyReports,
   deleteActiveDatasetFromFirestore 
@@ -293,14 +294,15 @@ export default function App() {
             setPlans(dataset.plans);
           }
 
-          // Restore date range from fuel_meta if user selected a specific month, otherwise use dataset
-          const savedMeta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", {});
-          if (savedMeta?.startDate && savedMeta?.endDate) {
-            setStartDate(savedMeta.startDate);
-            setEndDate(savedMeta.endDate);
+          if (dataset.startDate && dataset.endDate) {
+            setStartDate(dataset.startDate);
+            setEndDate(dataset.endDate);
           } else {
-            if (dataset.startDate) setStartDate(dataset.startDate);
-            if (dataset.endDate) setEndDate(dataset.endDate);
+            const savedMeta = getSyncLocalData<{ startDate?: string; endDate?: string }>("fuel_meta", {});
+            if (savedMeta?.startDate && savedMeta?.endDate) {
+              setStartDate(savedMeta.startDate);
+              setEndDate(savedMeta.endDate);
+            }
           }
 
           setFirestoreSyncStatus({
@@ -351,106 +353,31 @@ export default function App() {
         const extraLogs: FuelRecord[] = [];
         reports.forEach(rep => {
           if (rep.records && Array.isArray(rep.records) && rep.records.length > 0) {
-            // Check if incoming records have collapsed onto a single date (e.g. 2026-xx-15)
-            const uniqueDates = new Set(rep.records.map(r => r.tanggal).filter(Boolean));
-            let sanitizedRecords = rep.records;
-            if (uniqueDates.size <= 1) {
-              const mIdx = rep.monthIndex !== undefined && rep.monthIndex >= 0 ? rep.monthIndex : 0;
-              const mPad = String(mIdx + 1).padStart(2, "0");
-              const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
-              sanitizedRecords = rep.records.map((r, rIdx) => {
-                const dayNum = Math.min(daysInMonth, Math.max(1, Math.floor((rIdx / Math.max(1, rep.records!.length)) * daysInMonth) + 1));
-                const dayStr = String(dayNum).padStart(2, "0");
-                return {
-                  ...r,
-                  tanggal: `2026-${mPad}-${dayStr}`,
-                  jam: formatExcelTime(r.jam)
-                };
-              });
-            } else {
-              sanitizedRecords = rep.records.map(r => ({
-                ...r,
-                jam: formatExcelTime(r.jam)
-              }));
-            }
+            const sanitizedRecords = rep.records.map(r => ({
+              ...r,
+              tanggal: normalizeDateToYMD(r.tanggal) || r.tanggal,
+              jam: formatExcelTime(r.jam)
+            }));
             extraLogs.push(...sanitizedRecords);
-            hasNewRecords = true;
-          } else if (rep.unitSummaries && Array.isArray(rep.unitSummaries) && rep.unitSummaries.length > 0) {
-            // Guarantee full daily records if only unit aggregates were stored
-            const mIdx = rep.monthIndex !== undefined && rep.monthIndex >= 0 ? rep.monthIndex : 8;
-            const mPad = String(mIdx + 1).padStart(2, "0");
-            const ym = `2026-${mPad}`;
-            const daysInMonth = new Date(2026, mIdx + 1, 0).getDate() || 30;
-
-            rep.unitSummaries.forEach(u => {
-              if (u.totalVolume <= 0 && u.totalHours <= 0) return;
-              const dailyVol = Number((u.totalVolume / daysInMonth).toFixed(1));
-              const dailyHm = Number((u.totalHours / daysInMonth).toFixed(1));
-              for (let d = 1; d <= daysInMonth; d++) {
-                const dayStr = String(d).padStart(2, "0");
-                const hmBefore = Number((1000 + (d - 1) * dailyHm).toFixed(1));
-                const hmAfter = Number((hmBefore + dailyHm).toFixed(1));
-                extraLogs.push(processRecord({
-                  id: `synced-${ym}-${dayStr}-${u.idAlat}`,
-                  tanggal: `${ym}-${dayStr}`,
-                  storage: "Storage Utama Central",
-                  idAlat: u.idAlat,
-                  egy: u.egy || deriveEgy(u.idAlat, u.typeAlat || ""),
-                  typeAlat: u.typeAlat || deriveEquipmentType(u.idAlat),
-                  hmSebelum: hmBefore,
-                  hmSaatIni: hmAfter,
-                  volumeFuel: dailyVol,
-                  operator: "Operator Lapangan",
-                  fuelman: "Fuelman Onsite",
-                  shift: (d % 2 === 0) ? "Shift 1 - Siang" : "Shift 2 - Malam",
-                  jam: (d % 2 === 0) ? "10:30" : "21:45"
-                }));
-              }
-            });
             hasNewRecords = true;
           }
         });
 
         if (hasNewRecords && extraLogs.length > 0) {
           setRecords(prev => {
-            // Calculate day count per month in prev to avoid overwriting rich daily records with worse single-day data
-            const monthDayCountsPrev: Record<string, Set<string>> = {};
-            prev.forEach(r => {
-              const ym = r.tanggal?.substring(0, 7);
-              if (ym) {
-                if (!monthDayCountsPrev[ym]) monthDayCountsPrev[ym] = new Set();
-                monthDayCountsPrev[ym].add(r.tanggal);
-              }
-            });
-
-            const extraMonthsToReplace = new Set<string>();
-            const monthDayCountsExtra: Record<string, Set<string>> = {};
+            const extraMonths = new Set<string>();
             extraLogs.forEach(r => {
               const ym = r.tanggal?.substring(0, 7);
-              if (ym) {
-                if (!monthDayCountsExtra[ym]) monthDayCountsExtra[ym] = new Set();
-                monthDayCountsExtra[ym].add(r.tanggal);
-              }
+              if (ym) extraMonths.add(ym);
             });
 
-            Object.keys(monthDayCountsExtra).forEach(ym => {
-              const prevDays = monthDayCountsPrev[ym]?.size || 0;
-              const extraDays = monthDayCountsExtra[ym]?.size || 0;
-              // If incoming has >= 10 days of records or prev had fewer days, replace
-              if (extraDays >= 10 || extraDays >= prevDays || prevDays === 0) {
-                extraMonthsToReplace.add(ym);
-              }
+            // Keep prev records that are not in extraMonths
+            const keptPrev = prev.filter(r => {
+              const ym = r.tanggal?.substring(0, 7);
+              return !ym || !extraMonths.has(ym);
             });
 
-            const filteredPrev = prev.filter(r => {
-              const ym = r.tanggal?.substring(0, 7);
-              return !ym || !extraMonthsToReplace.has(ym);
-            });
-            const validIncoming = extraLogs.filter(r => {
-              const ym = r.tanggal?.substring(0, 7);
-              return ym && extraMonthsToReplace.has(ym);
-            });
-            const merged = mergeWithYearlyRecords([...filteredPrev, ...validIncoming]);
+            const merged = mergeWithYearlyRecords([...keptPrev, ...extraLogs]);
             saveLocalData("fuel_records", merged);
             return merged;
           });
@@ -463,6 +390,66 @@ export default function App() {
       unsubscribeMonthly();
     };
   }, []);
+
+  const handleReloadFromFirestore = async () => {
+    setFirestoreSyncStatus(prev => ({ ...prev, isLoading: true }));
+    try {
+      const activeData = await fetchActiveDatasetFromFirestore();
+      const monthlyReports = await fetchAllMonthlyReports();
+
+      let combinedRecords: FuelRecord[] = [];
+      if (activeData && activeData.records && activeData.records.length > 0) {
+        combinedRecords = [...activeData.records];
+      }
+
+      if (monthlyReports && monthlyReports.length > 0) {
+        const activeMonths = new Set(combinedRecords.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
+        monthlyReports.forEach(rep => {
+          if (rep.records && rep.records.length > 0) {
+            const firstDate = rep.records[0]?.tanggal;
+            const repMonth = firstDate ? (normalizeDateToYMD(firstDate) || firstDate).substring(0, 7) : null;
+            if (!repMonth || !activeMonths.has(repMonth)) {
+              combinedRecords.push(...rep.records.map(r => ({
+                ...r,
+                tanggal: normalizeDateToYMD(r.tanggal) || r.tanggal,
+                jam: formatExcelTime(r.jam)
+              })));
+            }
+          }
+        });
+      }
+
+      if (combinedRecords.length > 0) {
+        const merged = mergeWithYearlyRecords(combinedRecords);
+        setRecords(merged);
+        saveLocalData("fuel_records", merged);
+        if (activeData?.plans) {
+          setPlans(activeData.plans);
+          saveLocalData("fuel_plans", activeData.plans);
+        }
+        if (activeData?.startDate && activeData?.endDate) {
+          setStartDate(activeData.startDate);
+          setEndDate(activeData.endDate);
+        }
+        setFirestoreSyncStatus({
+          isSynced: true,
+          isLoading: false,
+          lastUpdated: new Date().toISOString(),
+          recordCount: combinedRecords.length,
+          fileName: activeData?.fileName || "Cloud Firestore Database"
+        });
+        setFileFeedback({
+          type: "success",
+          message: `Berhasil sinkronisasi! Memuat ${combinedRecords.length} transaksi bahan bakar dari Cloud Firestore.`
+        });
+      } else {
+        setFirestoreSyncStatus(prev => ({ ...prev, isLoading: false }));
+      }
+    } catch (err: any) {
+      console.warn("Manual reload from Firestore error:", err);
+      setFirestoreSyncStatus(prev => ({ ...prev, isLoading: false }));
+    }
+  };
 
   const handleGoogleLogin = async () => {
     setGoogleLoading(true);
@@ -1855,7 +1842,8 @@ export default function App() {
               totalHours: Number(u.totalHours.toFixed(1)),
               recordCount: u.recordCount,
               burnRate: u.totalHours > 0 ? Number((u.totalVolume / u.totalHours).toFixed(2)) : 0
-            }))
+            })),
+            records: parsed
           };
 
           saveMonthlyReportToFirestore(monthlyReportPayload).catch(e => console.warn("Firestore autosave note:", e));
@@ -2192,6 +2180,8 @@ export default function App() {
             initialEgy={selectedEgyFilter}
             egyPlans={egyPlans}
             unitPlans={unitRegistry}
+            firestoreSyncStatus={firestoreSyncStatus}
+            onReloadFirestore={handleReloadFromFirestore}
           />
         ) : activeTab === "plan" ? (
           <PlanFuelBurnPage

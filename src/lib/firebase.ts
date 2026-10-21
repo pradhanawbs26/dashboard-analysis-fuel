@@ -104,8 +104,26 @@ export async function saveMonthlyReportToFirestore(report: MonthlyReportData): P
   const batchesCount = Math.ceil(records.length / BATCH_SIZE) || 0;
 
   try {
-    // 1. Format clean payload with records directly included on the document
-    // (Up to ~2500 records is ~200KB, well within Firestore 1MB document limit, matching Jan-Aug storage)
+    // 1. Write record batches FIRST so they exist before metadata triggers real-time listeners
+    if (records.length > 0 && batchesCount > 0) {
+      try {
+        for (let i = 0; i < batchesCount; i++) {
+          const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
+          const batchDocRef = doc(db, MONTHLY_COLLECTION, docId, "batches", `batch_${i}`);
+          await setDoc(batchDocRef, {
+            batchIndex: i,
+            count: chunk.length,
+            records: chunk
+          });
+        }
+      } catch (bErr) {
+        console.warn(`Monthly report batches subcollection note for ${docId}:`, bErr);
+      }
+    }
+
+    // 2. Format clean main document payload
+    // If records count is small (<= 300), include them inline; otherwise store in batches to prevent 1MB limit crash
+    const inlineRecords = records.length <= 300 ? records : [];
     const payload: any = {
       id: docId,
       bulan: report.bulan,
@@ -120,31 +138,13 @@ export async function saveMonthlyReportToFirestore(report: MonthlyReportData): P
       typeSummaries: report.typeSummaries || [],
       unitSummaries: report.unitSummaries || [],
       plans: report.plans || {},
-      records: records,
+      records: inlineRecords,
       batchesCount,
       hasRecords: records.length > 0
     };
 
-    // Save main document FIRST so it is guaranteed to persist and trigger real-time listeners
+    // Save main document LAST to reliably notify all listeners with batches ready
     await setDoc(docRef, payload);
-
-    // 2. Best-effort subcollection batch writing (wrapped in try/catch so subcollection permission issues never abort main doc)
-    if (records.length > 0) {
-      try {
-        for (let i = 0; i < batchesCount; i++) {
-          const chunk = records.slice(i * BATCH_SIZE, (i + 1) * BATCH_SIZE);
-          const batchDocRef = doc(db, MONTHLY_COLLECTION, docId, "batches", `batch_${i}`);
-          await setDoc(batchDocRef, {
-            batchIndex: i,
-            count: chunk.length,
-            records: chunk
-          });
-        }
-      } catch (bErr) {
-        // Batches subcollection is optional; records are already safe and sound in the main document
-        console.warn(`Monthly report batches subcollection note for ${docId}:`, bErr);
-      }
-    }
   } catch (error) {
     handleFirestoreError(error, OperationType.WRITE, `${MONTHLY_COLLECTION}/${docId}`);
   }
@@ -163,18 +163,22 @@ export async function fetchAllMonthlyReports(): Promise<MonthlyReportData[]> {
       const data = d.data() as any;
       let reportRecords: FuelRecord[] = Array.isArray(data.records) ? data.records : [];
 
-      // If records were chunked in subcollection batches, load them
-      if (data.batchesCount && data.batchesCount > 0 && reportRecords.length === 0) {
+      // If records were chunked in subcollection batches, load all of them
+      if (data.batchesCount && data.batchesCount > 0 && reportRecords.length < (data.recordCount || 1)) {
         try {
           const batchesCol = collection(db, MONTHLY_COLLECTION, d.id, "batches");
           const batchesSnap = await getDocs(batchesCol);
           const sortedBatches = batchesSnap.docs
             .map(bd => bd.data() as { batchIndex: number; records: FuelRecord[] })
             .sort((a, b) => a.batchIndex - b.batchIndex);
+          const allBatchRecords: FuelRecord[] = [];
           for (const b of sortedBatches) {
             if (Array.isArray(b.records)) {
-              reportRecords = reportRecords.concat(b.records);
+              allBatchRecords.push(...b.records);
             }
+          }
+          if (allBatchRecords.length > reportRecords.length) {
+            reportRecords = allBatchRecords;
           }
         } catch (bErr) {
           console.warn(`Could not load batches for ${d.id}:`, bErr);
@@ -232,17 +236,21 @@ export function subscribeToMonthlyReports(
           const data = d.data() as any;
           let reportRecords: FuelRecord[] = Array.isArray(data.records) ? data.records : [];
 
-          if (data.batchesCount && data.batchesCount > 0 && reportRecords.length === 0) {
+          if (data.batchesCount && data.batchesCount > 0 && reportRecords.length < (data.recordCount || 1)) {
             try {
               const batchesCol = collection(db, MONTHLY_COLLECTION, d.id, "batches");
               const batchesSnap = await getDocs(batchesCol);
               const sortedBatches = batchesSnap.docs
                 .map(bd => bd.data() as { batchIndex: number; records: FuelRecord[] })
                 .sort((a, b) => a.batchIndex - b.batchIndex);
+              const allBatchRecords: FuelRecord[] = [];
               for (const b of sortedBatches) {
                 if (Array.isArray(b.records)) {
-                  reportRecords = reportRecords.concat(b.records);
+                  allBatchRecords.push(...b.records);
                 }
+              }
+              if (allBatchRecords.length > reportRecords.length) {
+                reportRecords = allBatchRecords;
               }
             } catch (bErr) {
               console.warn(`Could not load batches for monthly report ${d.id}:`, bErr);
