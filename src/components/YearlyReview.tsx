@@ -998,9 +998,12 @@ export default function YearlyReview({
           const rawRows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1 });
           if (rawRows.length < 2) continue; // too empty
 
-          // Scrape month from sheetName
+          // Scrape month from sheetName or fileName
           let monthIdentifier = sheetName; // fallback sheet name
-          const matchMonthIdx = getMonthFromText(sheetName);
+          let matchMonthIdx = getMonthFromText(sheetName);
+          if (matchMonthIdx === -1 && file && file.name) {
+            matchMonthIdx = getMonthFromText(file.name);
+          }
           if (matchMonthIdx !== -1) {
             monthIdentifier = MONTH_NAMES_IND[matchMonthIdx];
           }
@@ -1010,14 +1013,9 @@ export default function YearlyReview({
           
           const currentMonthName = selectedMonthForUpload || monthIdentifier;
           const currentMonthIdx = getMonthFromText(currentMonthName);
-          const isJuneOrLater = currentMonthIdx >= 5; // 5 = Juni, 6 = Juli, etc.
+          // Default to true (standard 17-column layout with Column 14 as Volume Fuel)
+          const isJuneOrLater = currentMonthIdx >= 5 || currentMonthIdx === -1;
 
-          // In standard Indonesian fuel reports (PT WBS):
-          // Col G (6): Tanggal, Col H (7): Storage, Col I (8): No Unit,
-          // Col J (9): Kategori, Col K (10): Type, Col L (11): HM Sebelum, Col M (12): HM Saat Ini,
-          // Col N (13): Volume Fuel (Liter) - Qty Pengisian Solar,
-          // Col O (14): Flowmeter Awal / Totalizer, Col P (15): Flowmeter Akhir,
-          // Col R (17) / S (18): Operator, Col U (20) / V (21): Fuelman, Col V (21) / W (22): Shift, Col W (22) / X (23): Jam
           let colMap = {
             tanggal: 6,                                                 // Column G (index 6)
             storage: 7,                                                 // Column H (index 7)
@@ -1025,7 +1023,7 @@ export default function YearlyReview({
             typeAlat: isJuneOrLater ? 10 : 9,                           // Column K (index 10) or Column J (index 9)
             hmSebelum: isJuneOrLater ? 11 : 10,                         // Column L (index 11) or Column K (index 10)
             hmSaatIni: isJuneOrLater ? 12 : 11,                         // Column M (index 12) or Column L (index 11)
-            volumeFuel: 13,                                             // Column N (index 13) - SELALU Volume Fuel (Liter)!
+            volumeFuel: isJuneOrLater ? 14 : 13,                        // Column O (index 14) or Column N (index 13)
             operator: isJuneOrLater ? 18 : 17,                          // Column S or R
             fuelman: isJuneOrLater ? 21 : 20,                           // Column V or U
             shift: isJuneOrLater ? 22 : 21,                             // Column W or V
@@ -1068,7 +1066,10 @@ export default function YearlyReview({
                 str.includes("stok") || 
                 str.includes("stock") ||
                 str.includes("target") ||
-                str.includes("plan");
+                str.includes("plan") ||
+                str.includes("selisih") ||
+                str.includes("running") ||
+                str.includes("hour");
               
               if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
                 tempMap.tanggal = cIdx;
@@ -1183,6 +1184,9 @@ export default function YearlyReview({
                   str === "volume fuel (liter)" ||
                   str === "volume (liter)" ||
                   str === "volume (l)" ||
+                  str === "total liter" ||
+                  str === "total fuel" ||
+                  str === "total (liter)" ||
                   str === "qty" || 
                   str === "qty pengisian" ||
                   str === "qty (liter)" ||
@@ -1191,14 +1195,27 @@ export default function YearlyReview({
                   str === "jumlah solar" ||
                   str === "solar (liter)" ||
                   str === "vol_fuel" ||
-                  (str.includes("volume") && !str.includes("burn")) ||
-                  (str.includes("qty") && !str.includes("flowmeter"))
+                  str === "liter" ||
+                  str === "fuel" ||
+                  str === "solar" ||
+                  str === "pemakaian" ||
+                  str === "pengisian" ||
+                  str.includes("volume") ||
+                  str.includes("qty") ||
+                  str.includes("liter") ||
+                  str.includes("solar") ||
+                  (str.includes("fuel") && !str.includes("man"))
                 )
               ) {
                 tempMap.volumeFuel = cIdx;
                 matches++;
               }
             });
+
+            // If hmSaatIni is detected as column 12, column 13 is ALWAYS Selisih HM, so volumeFuel must be 14
+            if (tempMap.hmSaatIni >= 12 && (tempMap.volumeFuel <= 13 || tempMap.volumeFuel === -1)) {
+              tempMap.volumeFuel = 14;
+            }
 
             // In Issued sheets with > 115 rows, the real transaction table header is around row 105-115
             const isHighRowMatch = isIssuedSheet && r >= 100 && matches >= 3;
@@ -1212,6 +1229,12 @@ export default function YearlyReview({
           if (maxMatches >= 2) {
             colMap = bestRowColMap;
             detectedHeaderRowIdx = bestHeaderRowIdx;
+          }
+
+          // Strict validation: if HM Saat Ini is Column 12 (or Column 11 HM Sebelum),
+          // Column 13 is ALWAYS Selisih HM / Running Hours, and Volume Fuel is ALWAYS Column 14 (Column O)!
+          if (colMap.hmSaatIni >= 12 && (colMap.volumeFuel <= 13 || colMap.volumeFuel === -1)) {
+            colMap.volumeFuel = 14;
           }
 
           // Start reading sheet row by row:
@@ -1277,20 +1300,10 @@ export default function YearlyReview({
               const egyAlat = deriveEgy(idAlat, typeAlat);
               if (!egyAlat || egyAlat === "C" || egyAlat.length < 2) continue;
 
-              // Extract volumes and HM with robust parser
-              let volVal = colMap.volumeFuel !== -1 && colMap.volumeFuel < row.length ? parseFuelNumber(row[colMap.volumeFuel]) : 0;
+              // Extract volumes and HM with original clean parser
+              const volVal = colMap.volumeFuel !== -1 && colMap.volumeFuel < row.length ? parseFuelNumber(row[colMap.volumeFuel]) : 0;
               const prevHmVal = colMap.hmSebelum !== -1 && colMap.hmSebelum < row.length ? parseFuelNumber(row[colMap.hmSebelum]) : 0;
               const currHmVal = colMap.hmSaatIni !== -1 && colMap.hmSaatIni < row.length ? parseFuelNumber(row[colMap.hmSaatIni]) : 0;
-              
-              // Intelligent volume column sanity guard:
-              // If colMap.volumeFuel picked up a cumulative flowmeter/totalizer (> 1000 L)
-              // while Column 13 (Column N) has the real fuel volume:
-              if (volVal > 1000 && row.length > 13) {
-                const col13Val = parseFuelNumber(row[13]);
-                if (col13Val > 0 && col13Val <= 600) {
-                  volVal = col13Val;
-                }
-              }
 
               let hoursVal = currHmVal - prevHmVal;
               let isAnomalyRow = false;

@@ -1436,20 +1436,35 @@ export function mergeWithYearlyRecords(incomingRecords: FuelRecord[]): FuelRecor
     return r;
   });
 
-  // Find all distinct months (YYYY-MM) in incomingRecords
-  const incomingMonths = new Set<string>();
+  // Group by YYYY-MM and filter out any month batch where > 80% of units have volumeFuel === selisihHm (1.00 L/J bug signature)
+  const monthGroups: Record<string, FuelRecord[]> = {};
   normalizedIncoming.forEach(r => {
-    if (r.tanggal && r.tanggal.length >= 7) {
-      incomingMonths.add(r.tanggal.substring(0, 7));
-    }
+    const ym = r.tanggal && r.tanggal.length >= 7 ? r.tanggal.substring(0, 7) : "unknown";
+    if (!monthGroups[ym]) monthGroups[ym] = [];
+    monthGroups[ym].push(r);
   });
 
-  // Base records from INITIAL_FUEL_DATA for any month that is not in incomingRecords
+  const validIncoming: FuelRecord[] = [];
+  const incomingMonths = new Set<string>();
+
+  Object.entries(monthGroups).forEach(([ym, recs]) => {
+    const validWithHm = recs.filter(r => r.selisihHm > 0);
+    const buggedCount = validWithHm.filter(r => Math.abs(r.volumeFuel - r.selisihHm) < 0.001).length;
+    const isCorrupted = validWithHm.length >= 5 && (buggedCount / validWithHm.length) > 0.8;
+    if (isCorrupted) {
+      console.warn(`mergeWithYearlyRecords: Discarding corrupted records for month ${ym} (1.00 L/J signature). Restoring clean baseline.`);
+      return; // Skip this corrupted month so INITIAL_FUEL_DATA provides the clean data
+    }
+    incomingMonths.add(ym);
+    validIncoming.push(...recs);
+  });
+
+  // Base records from INITIAL_FUEL_DATA for any month that is not in valid incoming records
   const baseOtherMonths = INITIAL_FUEL_DATA.filter(r => {
     const ym = r.tanggal?.substring(0, 7);
     return !ym || !incomingMonths.has(ym);
   });
 
-  return [...baseOtherMonths, ...normalizedIncoming];
+  return [...baseOtherMonths, ...validIncoming];
 }
 

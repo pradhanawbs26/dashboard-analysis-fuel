@@ -353,6 +353,15 @@ export default function App() {
         const extraLogs: FuelRecord[] = [];
         reports.forEach(rep => {
           if (rep.records && Array.isArray(rep.records) && rep.records.length > 0) {
+            // Ignore any previously stored monthly report with the 1.00 L/J bug signature (>80% records with volume === selisihHm)
+            const validWithHm = rep.records.filter(r => r.selisihHm > 0);
+            const buggedCount = validWithHm.filter(r => Math.abs(r.volumeFuel - r.selisihHm) < 0.001).length;
+            const isCorruptedReport = validWithHm.length >= 5 && (buggedCount / validWithHm.length) > 0.8;
+            if (isCorruptedReport) {
+              console.warn(`Ignoring corrupted monthly report for ${rep.bulan || rep.id} with 1.00 L/J signature`);
+              return;
+            }
+
             const sanitizedRecords = rep.records.map(r => ({
               ...r,
               tanggal: normalizeDateToYMD(r.tanggal) || r.tanggal,
@@ -647,7 +656,7 @@ export default function App() {
         brandAlat: 10,                       // Column K (index 10): Type.brand unit
         hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
         hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
-        volumeFuel: 13,                      // Column N (index 13): jumlah fuel yang diisi (Liter) - SELALU Kolom N!
+        volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi (Liter)
         operator: 18,                        // Column S (index 18): nama operator unit
         fuelman: 20,                         // Column U (index 20)
         shift: 21,                           // Column V (index 21)
@@ -673,7 +682,7 @@ export default function App() {
           const str = String(cell).toLowerCase().trim();
           if (!str) return;
 
-          // Exclude meteran / flowmeter / burn rate / fuelman / storage from volumeFuel
+          // Exclude meteran / flowmeter / burn rate / fuelman / storage / running hours from volumeFuel
           const isExcludedFromVol = str.includes("flowmeter") || 
             str.includes("flow meter") || 
             str.includes("totalizer") || 
@@ -690,7 +699,10 @@ export default function App() {
             str.includes("stok") || 
             str.includes("stock") ||
             str.includes("target") ||
-            str.includes("plan");
+            str.includes("plan") ||
+            str.includes("selisih") ||
+            str.includes("running") ||
+            str.includes("hour");
           
           if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
             tempMap.tanggal = cIdx;
@@ -805,6 +817,9 @@ export default function App() {
               str === "volume fuel (liter)" ||
               str === "volume (liter)" ||
               str === "volume (l)" ||
+              str === "total liter" ||
+              str === "total fuel" ||
+              str === "total (liter)" ||
               str === "qty" || 
               str === "qty pengisian" ||
               str === "qty (liter)" ||
@@ -813,14 +828,26 @@ export default function App() {
               str === "jumlah solar" ||
               str === "solar (liter)" ||
               str === "vol_fuel" ||
-              (str.includes("volume") && !str.includes("burn")) ||
-              (str.includes("qty") && !str.includes("flowmeter"))
+              str === "liter" ||
+              str === "fuel" ||
+              str === "solar" ||
+              str === "pemakaian" ||
+              str === "pengisian" ||
+              str.includes("volume") ||
+              str.includes("qty") ||
+              str.includes("liter") ||
+              str.includes("solar") ||
+              (str.includes("fuel") && !str.includes("man"))
             )
           ) {
             tempMap.volumeFuel = cIdx;
             matches++;
           }
         });
+
+        if (tempMap.hmSaatIni >= 12 && (tempMap.volumeFuel <= 13 || tempMap.volumeFuel === -1)) {
+          tempMap.volumeFuel = 14;
+        }
 
         const isHighRowMatch = isIssuedSheet && r >= 100 && matches >= 3;
         if (matches > maxMatches || (isHighRowMatch && bestHeaderRowIdx < 80)) {
@@ -833,6 +860,10 @@ export default function App() {
       if (maxMatches >= 2) {
         colMap = bestRowColMap;
         detectedHeaderRowIdx = bestHeaderRowIdx;
+      }
+
+      if (colMap.hmSaatIni >= 12 && (colMap.volumeFuel <= 13 || colMap.volumeFuel === -1)) {
+        colMap.volumeFuel = 14;
       }
 
       let startRowIndex = 1;
@@ -886,14 +917,7 @@ export default function App() {
 
         const hmSebelum = getFloatCell(colMap.hmSebelum, 0);
         const hmSaatIni = getFloatCell(colMap.hmSaatIni, 0);
-        let volumeFuel = getFloatCell(colMap.volumeFuel, 0);
-        // Sanity guard: If volume was mistakenly picked from flowmeter (> 1000 L)
-        if (volumeFuel > 1000 && row.length > 13) {
-          const col13Val = parseFuelNumber(row[13], 0);
-          if (col13Val > 0 && col13Val <= 600) {
-            volumeFuel = col13Val;
-          }
-        }
+        const volumeFuel = getFloatCell(colMap.volumeFuel, 0);
         const operator = getCell(colMap.operator, "Operator Lapangan");
         const fuelman = getCell(colMap.fuelman, "Fuelman Onsite");
         const shift = getCell(colMap.shift, "Shift 1 - Siang");
@@ -1469,7 +1493,7 @@ export default function App() {
           brandAlat: 10,                       // Column K (index 10): Type.brand unit
           hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
           hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
-          volumeFuel: 13,                      // Column N (index 13): jumlah fuel yang diisi (Liter) - SELALU Kolom N!
+          volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi (Liter)
           operator: 18,                        // Column S (index 18): nama operator unit
           fuelman: 20,                         // Column U (index 20)
           shift: 21,                           // Column V (index 21)
@@ -1495,7 +1519,7 @@ export default function App() {
             const str = String(cell).toLowerCase().trim();
             if (!str) return;
 
-            // Exclude meteran / flowmeter / burn rate / fuelman / storage from volumeFuel
+            // Exclude meteran / flowmeter / burn rate / fuelman / storage / running hours from volumeFuel
             const isExcludedFromVol = str.includes("flowmeter") || 
               str.includes("flow meter") || 
               str.includes("totalizer") || 
@@ -1512,7 +1536,10 @@ export default function App() {
               str.includes("stok") || 
               str.includes("stock") ||
               str.includes("target") ||
-              str.includes("plan");
+              str.includes("plan") ||
+              str.includes("selisih") ||
+              str.includes("running") ||
+              str.includes("hour");
             
             if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
               tempMap.tanggal = cIdx;
@@ -1627,6 +1654,9 @@ export default function App() {
                 str === "volume fuel (liter)" ||
                 str === "volume (liter)" ||
                 str === "volume (l)" ||
+                str === "total liter" ||
+                str === "total fuel" ||
+                str === "total (liter)" ||
                 str === "qty" || 
                 str === "qty pengisian" ||
                 str === "qty (liter)" ||
@@ -1635,14 +1665,26 @@ export default function App() {
                 str === "jumlah solar" ||
                 str === "solar (liter)" ||
                 str === "vol_fuel" ||
-                (str.includes("volume") && !str.includes("burn")) ||
-                (str.includes("qty") && !str.includes("flowmeter"))
+                str === "liter" ||
+                str === "fuel" ||
+                str === "solar" ||
+                str === "pemakaian" ||
+                str === "pengisian" ||
+                str.includes("volume") ||
+                str.includes("qty") ||
+                str.includes("liter") ||
+                str.includes("solar") ||
+                (str.includes("fuel") && !str.includes("man"))
               )
             ) {
               tempMap.volumeFuel = cIdx;
               matches++;
             }
           });
+
+          if (tempMap.hmSaatIni >= 12 && (tempMap.volumeFuel <= 13 || tempMap.volumeFuel === -1)) {
+            tempMap.volumeFuel = 14;
+          }
 
           const isHighRowMatch = isIssuedSheet && r >= 100 && matches >= 3;
           if (matches > maxMatches || (isHighRowMatch && bestHeaderRowIdx < 80)) {
@@ -1655,6 +1697,10 @@ export default function App() {
         if (maxMatches >= 2) {
           colMap = bestRowColMap;
           detectedHeaderRowIdx = bestHeaderRowIdx;
+        }
+
+        if (colMap.hmSaatIni >= 12 && (colMap.volumeFuel <= 13 || colMap.volumeFuel === -1)) {
+          colMap.volumeFuel = 14;
         }
 
         let startRowIndex = 1;
@@ -1724,14 +1770,7 @@ export default function App() {
 
           const hmSebelum = getFloatCell(colMap.hmSebelum, 0);
           const hmSaatIni = getFloatCell(colMap.hmSaatIni, 0);
-          let volumeFuel = getFloatCell(colMap.volumeFuel, 0);
-          // Sanity guard: If volume was mistakenly picked from flowmeter (> 1000 L)
-          if (volumeFuel > 1000 && row.length > 13) {
-            const col13Val = parseFuelNumber(row[13], 0);
-            if (col13Val > 0 && col13Val <= 600) {
-              volumeFuel = col13Val;
-            }
-          }
+          const volumeFuel = getFloatCell(colMap.volumeFuel, 0);
           const operator = getCell(colMap.operator, "Operator Lapangan");
           const fuelman = getCell(colMap.fuelman, "Fuelman Onsite");
           const shift = getCell(colMap.shift, "Shift 1 - Siang");
