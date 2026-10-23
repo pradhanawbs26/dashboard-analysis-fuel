@@ -30,11 +30,13 @@ service cloud.firestore {
 
     // Monthly fuel reports collection
     match /monthly_reports/{reportId} {
-      allow read, write: if isValidId(reportId);
+      allow get: if isValidId(reportId);
+      allow list: if true;
+      allow create, update, delete: if isValidId(reportId);
 
       // Subcollections including batches
-      match /{allChildren=**} {
-        allow read, write: if true;
+      match /batches/{batchId} {
+        allow get, list, create, update, delete: if true;
       }
     }
 

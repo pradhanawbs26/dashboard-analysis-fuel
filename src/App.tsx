@@ -34,7 +34,7 @@ import * as XLSX from "xlsx";
 import html2canvas from "html2canvas-pro";
 import { jsPDF } from "jspdf";
 import { FuelRecord, EgyPlanMap, UnitRegistryMap } from "./types";
-import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, formatExcelTime, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords, getCanonicalUnitId } from "./data/sampleData";
+import { INITIAL_FUEL_DATA, processRecord, parsePastedData, normalizeDateToYMD, formatExcelTime, deriveEgy, cleanEgyName, deriveEquipmentType, mergeWithYearlyRecords, getCanonicalUnitId, parseFuelNumber } from "./data/sampleData";
 import MetricCard from "./components/MetricCard";
 import ParetoChart from "./components/ParetoChart";
 import AnomalyDetailsView from "./components/AnomalyDetailsView";
@@ -647,17 +647,17 @@ export default function App() {
         brandAlat: 10,                       // Column K (index 10): Type.brand unit
         hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
         hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
-        volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi
+        volumeFuel: 13,                      // Column N (index 13): jumlah fuel yang diisi (Liter) - SELALU Kolom N!
         operator: 18,                        // Column S (index 18): nama operator unit
         fuelman: 20,                         // Column U (index 20)
         shift: 21,                           // Column V (index 21)
         jam: 22                              // Column W (index 22)
       };
 
-      // Universal dynamic header row and column scanner (scans up to 120 rows)
+      // Universal dynamic header row and column scanner (scans up to 125 rows)
       let detectedHeaderRowIdx = -1;
       let bestHeaderRowIdx = -1;
-      const scanRowsLimit = Math.min(logRows.length, 120);
+      const scanRowsLimit = Math.min(logRows.length, 125);
       let maxMatches = 0;
       let bestRowColMap = { ...colMap };
 
@@ -672,6 +672,25 @@ export default function App() {
           if (cell === undefined || cell === null) return;
           const str = String(cell).toLowerCase().trim();
           if (!str) return;
+
+          // Exclude meteran / flowmeter / burn rate / fuelman / storage from volumeFuel
+          const isExcludedFromVol = str.includes("flowmeter") || 
+            str.includes("flow meter") || 
+            str.includes("totalizer") || 
+            str.includes("meteran") || 
+            str.includes("meter") || 
+            str.includes("burn") || 
+            str.includes("rate") || 
+            str.includes("l/jam") || 
+            str.includes("fuelman") || 
+            str.includes("fuel man") ||
+            str.includes("storage") || 
+            str.includes("tempat") || 
+            str.includes("sisa") || 
+            str.includes("stok") || 
+            str.includes("stock") ||
+            str.includes("target") ||
+            str.includes("plan");
           
           if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
             tempMap.tanggal = cIdx;
@@ -744,20 +763,6 @@ export default function App() {
             tempMap.hmSaatIni = cIdx;
             matches++;
           } else if (
-            str.includes("volume") || 
-            str.includes("fuel") || 
-            str.includes("liter") || 
-            str === "vol_fuel" || 
-            str === "qty" || 
-            str === "vol" || 
-            str === "volume fuel (liter)" ||
-            str === "jumlah" ||
-            str === "jumlah (liter)" ||
-            str === "liter"
-          ) {
-            tempMap.volumeFuel = cIdx;
-            matches++;
-          } else if (
             str === "operator" || 
             str === "nama operator" || 
             str === "driver" ||
@@ -771,7 +776,8 @@ export default function App() {
             str === "pengisi" || 
             str === "petugas" || 
             str === "nama fuelman" ||
-            str.includes("fuelman")
+            str.includes("fuelman") ||
+            str.includes("fuel man")
           ) {
             tempMap.fuelman = cIdx;
             matches++;
@@ -791,10 +797,33 @@ export default function App() {
           ) {
             tempMap.jam = cIdx;
             matches++;
+          } else if (
+            !isExcludedFromVol && (
+              str === "volume" || 
+              str === "vol" || 
+              str === "volume fuel" ||
+              str === "volume fuel (liter)" ||
+              str === "volume (liter)" ||
+              str === "volume (l)" ||
+              str === "qty" || 
+              str === "qty pengisian" ||
+              str === "qty (liter)" ||
+              str === "jumlah" ||
+              str === "jumlah (liter)" ||
+              str === "jumlah solar" ||
+              str === "solar (liter)" ||
+              str === "vol_fuel" ||
+              (str.includes("volume") && !str.includes("burn")) ||
+              (str.includes("qty") && !str.includes("flowmeter"))
+            )
+          ) {
+            tempMap.volumeFuel = cIdx;
+            matches++;
           }
         });
 
-        if (matches > maxMatches) {
+        const isHighRowMatch = isIssuedSheet && r >= 100 && matches >= 3;
+        if (matches > maxMatches || (isHighRowMatch && bestHeaderRowIdx < 80)) {
           maxMatches = matches;
           bestHeaderRowIdx = r;
           bestRowColMap = tempMap;
@@ -806,9 +835,16 @@ export default function App() {
         detectedHeaderRowIdx = bestHeaderRowIdx;
       }
 
-      const startRowIndex = detectedHeaderRowIdx !== -1 
-        ? detectedHeaderRowIdx + 1 
-        : (isIssuedSheet && logRows.length > 115 ? 109 : 1);
+      let startRowIndex = 1;
+      if (detectedHeaderRowIdx !== -1) {
+        if (isIssuedSheet && logRows.length > 115 && detectedHeaderRowIdx < 80) {
+          startRowIndex = 109;
+        } else {
+          startRowIndex = detectedHeaderRowIdx + 1;
+        }
+      } else {
+        startRowIndex = (isIssuedSheet && logRows.length > 115 ? 109 : 1);
+      }
       const parsed: FuelRecord[] = [];
 
       logRows.forEach((row, index) => {
@@ -829,8 +865,7 @@ export default function App() {
 
         const getFloatCell = (idx: number, def = 0) => {
           if (idx === -1 || idx >= row.length) return def;
-          const val = parseFloat(row[idx]);
-          return isNaN(val) ? def : val;
+          return parseFuelNumber(row[idx], def);
         };
 
         const dateCellIdx = colMap.tanggal;
@@ -851,7 +886,14 @@ export default function App() {
 
         const hmSebelum = getFloatCell(colMap.hmSebelum, 0);
         const hmSaatIni = getFloatCell(colMap.hmSaatIni, 0);
-        const volumeFuel = getFloatCell(colMap.volumeFuel, 0);
+        let volumeFuel = getFloatCell(colMap.volumeFuel, 0);
+        // Sanity guard: If volume was mistakenly picked from flowmeter (> 1000 L)
+        if (volumeFuel > 1000 && row.length > 13) {
+          const col13Val = parseFuelNumber(row[13], 0);
+          if (col13Val > 0 && col13Val <= 600) {
+            volumeFuel = col13Val;
+          }
+        }
         const operator = getCell(colMap.operator, "Operator Lapangan");
         const fuelman = getCell(colMap.fuelman, "Fuelman Onsite");
         const shift = getCell(colMap.shift, "Shift 1 - Siang");
@@ -1427,17 +1469,17 @@ export default function App() {
           brandAlat: 10,                       // Column K (index 10): Type.brand unit
           hmSebelum: 11,                       // Column L (index 11): HM pengisian fuel sebelumnya
           hmSaatIni: 12,                       // Column M (index 12): HM pengisian fuel pada tanggal itu
-          volumeFuel: 14,                      // Column O (index 14): jumlah fuel yang diisi
+          volumeFuel: 13,                      // Column N (index 13): jumlah fuel yang diisi (Liter) - SELALU Kolom N!
           operator: 18,                        // Column S (index 18): nama operator unit
           fuelman: 20,                         // Column U (index 20)
           shift: 21,                           // Column V (index 21)
           jam: 22                              // Column W (index 22)
         };
 
-        // Universal dynamic header row and column scanner (scans up to 120 rows)
+        // Universal dynamic header row and column scanner (scans up to 125 rows)
         let detectedHeaderRowIdx = -1;
         let bestHeaderRowIdx = -1;
-        const scanRowsLimit = Math.min(rawJson.length, 120);
+        const scanRowsLimit = Math.min(rawJson.length, 125);
         let maxMatches = 0;
         let bestRowColMap = { ...colMap };
 
@@ -1452,6 +1494,25 @@ export default function App() {
             if (cell === undefined || cell === null) return;
             const str = String(cell).toLowerCase().trim();
             if (!str) return;
+
+            // Exclude meteran / flowmeter / burn rate / fuelman / storage from volumeFuel
+            const isExcludedFromVol = str.includes("flowmeter") || 
+              str.includes("flow meter") || 
+              str.includes("totalizer") || 
+              str.includes("meteran") || 
+              str.includes("meter") || 
+              str.includes("burn") || 
+              str.includes("rate") || 
+              str.includes("l/jam") || 
+              str.includes("fuelman") || 
+              str.includes("fuel man") ||
+              str.includes("storage") || 
+              str.includes("tempat") || 
+              str.includes("sisa") || 
+              str.includes("stok") || 
+              str.includes("stock") ||
+              str.includes("target") ||
+              str.includes("plan");
             
             if (str === "tanggal" || str === "tgl" || str === "date" || str.includes("tanggal")) {
               tempMap.tanggal = cIdx;
@@ -1524,20 +1585,6 @@ export default function App() {
               tempMap.hmSaatIni = cIdx;
               matches++;
             } else if (
-              str.includes("volume") || 
-              str.includes("fuel") || 
-              str.includes("liter") || 
-              str === "vol_fuel" || 
-              str === "qty" || 
-              str === "vol" || 
-              str === "volume fuel (liter)" ||
-              str === "jumlah" ||
-              str === "jumlah (liter)" ||
-              str === "liter"
-            ) {
-              tempMap.volumeFuel = cIdx;
-              matches++;
-            } else if (
               str === "operator" || 
               str === "nama operator" || 
               str === "driver" ||
@@ -1551,7 +1598,8 @@ export default function App() {
               str === "pengisi" || 
               str === "petugas" || 
               str === "nama fuelman" ||
-              str.includes("fuelman")
+              str.includes("fuelman") ||
+              str.includes("fuel man")
             ) {
               tempMap.fuelman = cIdx;
               matches++;
@@ -1571,10 +1619,33 @@ export default function App() {
             ) {
               tempMap.jam = cIdx;
               matches++;
+            } else if (
+              !isExcludedFromVol && (
+                str === "volume" || 
+                str === "vol" || 
+                str === "volume fuel" ||
+                str === "volume fuel (liter)" ||
+                str === "volume (liter)" ||
+                str === "volume (l)" ||
+                str === "qty" || 
+                str === "qty pengisian" ||
+                str === "qty (liter)" ||
+                str === "jumlah" ||
+                str === "jumlah (liter)" ||
+                str === "jumlah solar" ||
+                str === "solar (liter)" ||
+                str === "vol_fuel" ||
+                (str.includes("volume") && !str.includes("burn")) ||
+                (str.includes("qty") && !str.includes("flowmeter"))
+              )
+            ) {
+              tempMap.volumeFuel = cIdx;
+              matches++;
             }
           });
 
-          if (matches > maxMatches) {
+          const isHighRowMatch = isIssuedSheet && r >= 100 && matches >= 3;
+          if (matches > maxMatches || (isHighRowMatch && bestHeaderRowIdx < 80)) {
             maxMatches = matches;
             bestHeaderRowIdx = r;
             bestRowColMap = tempMap;
@@ -1586,9 +1657,16 @@ export default function App() {
           detectedHeaderRowIdx = bestHeaderRowIdx;
         }
 
-        const startRowIndex = detectedHeaderRowIdx !== -1 
-          ? detectedHeaderRowIdx + 1 
-          : (isIssuedSheet && rawJson.length > 115 ? 109 : 1);
+        let startRowIndex = 1;
+        if (detectedHeaderRowIdx !== -1) {
+          if (isIssuedSheet && rawJson.length > 115 && detectedHeaderRowIdx < 80) {
+            startRowIndex = 109;
+          } else {
+            startRowIndex = detectedHeaderRowIdx + 1;
+          }
+        } else {
+          startRowIndex = (isIssuedSheet && rawJson.length > 115 ? 109 : 1);
+        }
         const parsed: FuelRecord[] = [];
 
         rawJson.forEach((row, index) => {
@@ -1611,8 +1689,7 @@ export default function App() {
 
           const getFloatCell = (idx: number, def = 0) => {
             if (idx === -1 || idx >= row.length) return def;
-            const val = parseFloat(row[idx]);
-            return isNaN(val) ? def : val;
+            return parseFuelNumber(row[idx], def);
           };
 
           // Parse date properly using highly robust shared normalizer
@@ -1647,7 +1724,14 @@ export default function App() {
 
           const hmSebelum = getFloatCell(colMap.hmSebelum, 0);
           const hmSaatIni = getFloatCell(colMap.hmSaatIni, 0);
-          const volumeFuel = getFloatCell(colMap.volumeFuel, 0);
+          let volumeFuel = getFloatCell(colMap.volumeFuel, 0);
+          // Sanity guard: If volume was mistakenly picked from flowmeter (> 1000 L)
+          if (volumeFuel > 1000 && row.length > 13) {
+            const col13Val = parseFuelNumber(row[13], 0);
+            if (col13Val > 0 && col13Val <= 600) {
+              volumeFuel = col13Val;
+            }
+          }
           const operator = getCell(colMap.operator, "Operator Lapangan");
           const fuelman = getCell(colMap.fuelman, "Fuelman Onsite");
           const shift = getCell(colMap.shift, "Shift 1 - Siang");

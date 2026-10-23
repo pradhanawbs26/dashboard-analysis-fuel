@@ -155,6 +155,37 @@ export function normalizeDateToYMD(cellVal: any): string {
   return datePart;
 }
 
+/**
+ * Highly robust numeric parser for fuel volume and hour meters
+ * Handles JavaScript numbers, Indonesian formatting (1.234,56 or 5,622),
+ * English formatting (1,234.56), and cleans extraneous characters.
+ */
+export function parseFuelNumber(val: any, def = 0): number {
+  if (val === undefined || val === null || val === "") return def;
+  if (typeof val === "number") return isNaN(val) ? def : val;
+  let s = String(val).trim();
+  if (!s) return def;
+  
+  // Strip currency / units text e.g. "L", "Liter", "Jam", "HM"
+  s = s.replace(/(liter|litres|ltr|l|jam|hm|hours|hrs)$/i, "").trim();
+
+  // If string has both dot and comma
+  if (s.includes(".") && s.includes(",")) {
+    if (s.indexOf(".") < s.indexOf(",")) {
+      // Indonesian: "1.234,50" -> "1234.50"
+      s = s.replace(/\./g, "").replace(",", ".");
+    } else {
+      // English: "1,234.50" -> "1234.50"
+      s = s.replace(/,/g, "");
+    }
+  } else if (s.includes(",")) {
+    // Indonesian decimal comma: "12,5" -> "12.5"
+    s = s.replace(",", ".");
+  }
+  const parsed = parseFloat(s);
+  return isNaN(parsed) ? def : parsed;
+}
+
 export const MONTH_NAMES_IND = [
   "Januari",
   "Februari",
