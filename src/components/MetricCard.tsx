@@ -1,5 +1,5 @@
 import React from "react";
-import { Fuel, Clock, Gauge, AlertCircle } from "lucide-react";
+import { Fuel, Clock, Gauge, AlertCircle, Info } from "lucide-react";
 import { motion } from "motion/react";
 
 interface MetricCardProps {
@@ -33,24 +33,21 @@ export default function MetricCard({
       iconBg: "bg-[#4682B4]/10 text-[#4682B4]",
       accent: "text-[#4682B4]",
       ring: "focus-within:ring-[#4682B4]",
-      glow: "hover:shadow-md",
-      border: "border-l-4 border-l-[#4682B4]"
+      glow: "hover:shadow-md"
     },
     emerald: {
       bg: "bg-white border-slate-200/90 hover:border-emerald-500",
       iconBg: "bg-emerald-50 text-emerald-600",
       accent: "text-emerald-700",
       ring: "focus-within:ring-emerald-500",
-      glow: "hover:shadow-md",
-      border: "border-l-4 border-l-emerald-600"
+      glow: "hover:shadow-md"
     },
     amber: {
       bg: "bg-[#1E293B] text-white border-slate-700 hover:border-slate-500",
       iconBg: "bg-slate-800 text-slate-300",
       accent: "text-amber-400",
       ring: "focus-within:ring-slate-400",
-      glow: "hover:shadow-md",
-      border: "border-l-4 border-l-amber-500"
+      glow: "hover:shadow-md"
     }
   };
 
@@ -63,7 +60,7 @@ export default function MetricCard({
       initial={{ opacity: 0, y: 15 }}
       animate={{ opacity: 1, y: 0 }}
       transition={{ duration: 0.4 }}
-      className={`relative p-5 rounded-xl border ${style.bg} ${style.border} ${style.glow} transition-all duration-300 flex flex-col justify-between h-full`}
+      className={`relative p-5 rounded-xl border ${style.bg} ${style.glow} transition-all duration-300 flex flex-col justify-between h-full`}
     >
       <div>
         <div className="flex items-center justify-between mb-3">
@@ -120,12 +117,17 @@ export default function MetricCard({
         </div>
       </div>
 
-      {/* Tooltip help indicator */}
-      <div className="absolute top-2 right-2 opacity-0 hover:opacity-100 transition-opacity duration-200 cursor-help" title={helpText}>
-        <div className="absolute right-0 bg-slate-800 text-white text-[10px] w-48 p-2 rounded shadow-xl leading-relaxed z-10 font-normal">
+      {/* Info button: visible on hover and keyboard focus (Tab-accessible) */}
+      <button
+        className="absolute top-2 right-2 text-slate-300 hover:text-slate-500 focus:text-slate-500 transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-400 focus-visible:ring-offset-1 rounded group"
+        aria-label={`Keterangan: ${helpText}`}
+        title={helpText}
+      >
+        <Info className="w-3.5 h-3.5" />
+        <div className="hidden group-hover:block group-focus:block absolute right-0 top-5 bg-slate-800 text-white text-[10px] w-48 p-2 rounded shadow-xl leading-relaxed z-10 font-normal pointer-events-none text-left">
           {helpText}
         </div>
-      </div>
+      </button>
     </motion.div>
   );
 }

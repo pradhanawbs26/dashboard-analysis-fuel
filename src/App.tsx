@@ -9,7 +9,9 @@ import {
   AlertTriangle, 
   Info, 
   FileSpreadsheet, 
-  Sparkles,
+  CheckCircle2,
+  FileCheck,
+  BarChart2,
   ChevronDown,
   User,
   Clock,
@@ -2157,76 +2159,76 @@ export default function App() {
         
         {/* Navigation Tabs row below Header with Cloud Synch Badge */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 w-full sm:w-auto shadow-sm">
+          <div className="flex bg-slate-200/60 p-1 rounded-xl border border-slate-300/40 w-full sm:w-auto">
             <button
               onClick={() => {
                 setActiveTab("dashboard");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === "dashboard"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
               }`}
             >
               <TrendingUp className="w-4 h-4" />
-              <span>MONTHLY REVIEW</span>
+              <span>Monthly Review</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab("daily");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === "daily"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
               }`}
             >
               <CalendarDays className="w-4 h-4" />
-              <span>DAILY REVIEW</span>
+              <span>Daily Review</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab("yearly");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === "yearly"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
               }`}
             >
               <Calendar className="w-4 h-4" />
-              <span>YEARLY REVIEW</span>
+              <span>Yearly Review</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab("evaluation");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === "evaluation"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
               }`}
             >
               <Target className="w-4 h-4 text-emerald-400" />
-              <span>EVALUASI FUEL BURN</span>
+              <span>Evaluasi Fuel Burn</span>
             </button>
             <button
               onClick={() => {
                 setActiveTab("plan");
                 setViewingAnomaliesPage(false);
               }}
-              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-black transition-all cursor-pointer ${
+              className={`flex items-center justify-center gap-2 py-2.5 px-4 rounded-lg text-xs font-bold transition-all cursor-pointer ${
                 activeTab === "plan"
                   ? "bg-[#1E293B] text-white shadow"
                   : "text-slate-600 hover:text-slate-800"
               }`}
             >
               <SlidersHorizontal className="w-4 h-4" />
-              <span>INPUT PLAN FUEL BURN</span>
+              <span>Input Plan Fuel Burn</span>
             </button>
           </div>
 
@@ -2234,19 +2236,19 @@ export default function App() {
           <div className="flex items-center gap-2">
             {firestoreSyncStatus.isSynced ? (
               <div 
-                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 shadow-xs text-xs font-bold text-emerald-800 transition"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 border border-emerald-200 text-xs font-bold text-emerald-800 transition"
                 title={`Cloud Synch: Terkoneksi Realtime ke Firestore (${records.length} baris data)`}
               >
                 <span className="relative flex h-2.5 w-2.5">
                   <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75"></span>
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500"></span>
                 </span>
-                <Cloud className="w-4 h-4 text-emerald-600 animate-pulse" />
+                <Cloud className="w-4 h-4 text-emerald-600" />
                 <span className="tracking-wide">Cloud Synch</span>
               </div>
             ) : (
               <div 
-                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 shadow-xs text-xs font-bold text-rose-800 transition"
+                className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-rose-50 border border-rose-200 text-xs font-bold text-rose-800 transition"
                 title="Cloud Synch: Offline / Mode Penyimpanan Lokal"
               >
                 <span className="inline-flex rounded-full h-2.5 w-2.5 bg-rose-500"></span>
@@ -2372,7 +2374,7 @@ export default function App() {
                           
                           {hasPlanSheetPresent && (
                             <span className="inline-flex items-center gap-1.5 text-[10px] text-emerald-700 bg-emerald-50 px-2.5 py-1 rounded-full font-extrabold border border-emerald-200 mt-1 sm:mt-0">
-                              <Sparkles className="w-3 h-3" />
+                              <FileCheck className="w-3 h-3" />
                               <span>Mendeteksi Sheet Pembanding "List & FC"</span>
                             </span>
                           )}
@@ -2395,9 +2397,9 @@ export default function App() {
                     <button
                       onClick={() => processUploadedFile(selectedFile, selectedLogSheet)}
                       disabled={isProcessingFile}
-                      className="text-xs bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-600 hover:to-amber-700 disabled:opacity-50 text-slate-950 px-4.5 py-2.5 rounded-lg font-black tracking-tight transition shadow-sm cursor-pointer active:scale-95 flex items-center justify-center gap-2 relative group overflow-hidden"
+                      className="text-xs bg-amber-500 hover:bg-amber-600 disabled:opacity-50 text-white px-4.5 py-2.5 rounded-lg font-bold transition shadow-sm cursor-pointer active:scale-95 flex items-center justify-center gap-2"
                     >
-                      <Sparkles className="w-4 h-4 text-slate-950 fill-slate-950" />
+                      <BarChart2 className="w-4 h-4" />
                       <span>{isProcessingFile ? "Sedang Menganalisis..." : "Mulai Analisa Data Excel"}</span>
                     </button>
                   </div>
@@ -2461,12 +2463,12 @@ export default function App() {
                 : "bg-rose-50 border-rose-200 text-rose-800"
             }`}>
               {fileFeedback.type === "success" ? (
-                <Sparkles className="w-5 h-5 shrink-0 text-[#137333] mt-0.5" />
+                <CheckCircle2 className="w-5 h-5 shrink-0 text-[#137333] mt-0.5" />
               ) : (
                 <AlertTriangle className="w-5 h-5 shrink-0 text-rose-600 mt-0.5" />
               )}
               <div className="text-xs font-medium font-sans flex-1">
-                <strong className="block font-bold mb-0.5 text-rose-900">
+                <strong className={`block font-bold mb-0.5 ${fileFeedback.type === "success" ? "text-green-900" : "text-rose-900"}`}>
                   {fileFeedback.type === "success" ? "Proses Impor Sukses!" : "Kesalahan Pembacaan Berkas Excel!"}
                 </strong>
                 <span>{fileFeedback.message}</span>
@@ -2476,12 +2478,12 @@ export default function App() {
         )}
 
         {/* Interactive Filters Panel */}
-        <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-4 sm:p-5 flex flex-wrap items-center gap-4 sm:gap-6 font-sans">
+        <div className="bg-white rounded-xl border border-slate-200 p-4 sm:p-5 flex flex-wrap items-center gap-4 sm:gap-6 font-sans">
           
           {/* Quick Month Dropdown from Uploaded Data */}
           {availableMonths.length > 0 && (
             <div className="flex flex-col">
-              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+              <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
                 <Calendar className="w-3 h-3 text-[#4682B4]" />
                 <span>PILIH BULAN</span>
               </label>
@@ -2509,7 +2511,7 @@ export default function App() {
 
           {/* Date Range Picker */}
           <div className="flex flex-col">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
               <Calendar className="w-3 h-3 text-[#4682B4]" />
               <span>RENTANG TANGGAL</span>
             </label>
@@ -2532,7 +2534,7 @@ export default function App() {
 
           {/* Egy Alat Filter - Placed directly next to Rentang Tanggal */}
           <div className="flex flex-col">
-            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wider flex items-center gap-1">
+            <label className="text-[10px] font-bold text-slate-500 uppercase tracking-wide flex items-center gap-1">
               <Filter className="w-3 h-3 text-[#4682B4]" />
               <span>EGY ALAT (EQUIPMENT)</span>
             </label>
@@ -2565,7 +2567,7 @@ export default function App() {
           {referenceDate && (
             <div className="bg-[#1E293B] text-slate-350 px-4 py-3 rounded-xl border border-slate-700/60 text-xs flex flex-col sm:flex-row justify-between items-start sm:items-center shadow-sm gap-2 shrink-0 select-none">
               <div className="flex items-center gap-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 animate-pulse"></span>
+                <span className="w-2.5 h-2.5 rounded-full bg-emerald-500"></span>
                 <span>
                   Tanggal Acuan Analisa Fuel: <strong className="text-white font-mono">{referenceDate}</strong>
                 </span>
@@ -2625,7 +2627,7 @@ export default function App() {
             <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center border-b border-slate-100 pb-4 mb-4 gap-2">
               <div>
                 <h3 className="text-sm font-bold text-slate-800 flex items-center gap-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500 animate-pulse"></span>
+                  <span className="w-2.5 h-2.5 rounded-full bg-rose-500"></span>
                   Monitoring Deviasi Efisiensi Unit (Aktual vs Target Plan)
                 </h3>
                 <p className="text-[11px] text-slate-500 mt-0.5">
@@ -2639,7 +2641,10 @@ export default function App() {
 
             {overPlanUnits.length === 0 ? (
               <div className="text-center py-8 bg-slate-50 rounded-lg text-slate-500 text-xs border border-dashed border-slate-200">
-                <p className="font-bold text-emerald-600 font-sans text-xs">💪 SEMUA UNIT BERJALAN EFISIEN</p>
+                <p className="font-bold text-emerald-600 font-sans text-xs flex items-center justify-center gap-1.5">
+                  <CheckCircle2 className="w-4 h-4" />
+                  Semua Unit Berjalan Efisien
+                </p>
                 <p className="mt-1 text-slate-400">Tidak ada unit alat berat yang melampaui plan Fuel Burn yang terdaftar pada target sheet.</p>
               </div>
             ) : (
