@@ -282,11 +282,20 @@ export default function App() {
       (dataset) => {
         if (dataset && dataset.records && dataset.records.length > 0) {
           const currentLocal = getSyncLocalData<FuelRecord[]>("fuel_records", []);
-          // Combine local records from other months with dataset records
-          const datasetMonths = new Set(dataset.records.map(r => r.tanggal?.substring(0, 7)).filter(Boolean));
+          // Count records per month in incoming cloud dataset
+          const datasetMonthCounts = new Map<string, number>();
+          dataset.records.forEach(r => {
+            const ym = r.tanggal?.substring(0, 7);
+            if (ym) datasetMonthCounts.set(ym, (datasetMonthCounts.get(ym) || 0) + 1);
+          });
+
+          // Only purge month from local if dataset has full replacement records (> 25 records)
+          // Preserves previous months if dataset only has 1-5 boundary rollover records
           const preservedOtherMonths = currentLocal.filter(r => {
             const ym = r.tanggal?.substring(0, 7);
-            return ym && !datasetMonths.has(ym);
+            if (!ym) return true;
+            const countInDataset = datasetMonthCounts.get(ym) || 0;
+            return countInDataset <= 25;
           });
           const combined = [...preservedOtherMonths, ...dataset.records];
           const mergedRecords = mergeWithYearlyRecords(combined);
@@ -1405,7 +1414,7 @@ export default function App() {
 
             // Save active dataset to Cloud Firestore
             saveActiveDatasetToFirestore({
-              records: parsed,
+              records: mergedCsv,
               plans: plans,
               startDate: sorted[0],
               endDate: sorted[sorted.length - 1],
@@ -1821,9 +1830,9 @@ export default function App() {
             activeTab: "dashboard"
           });
 
-          // Save complete raw dataset into Cloud Firestore Active Dataset
+          // Save complete cumulative dataset into Cloud Firestore Active Dataset
           saveActiveDatasetToFirestore({
-            records: parsed,
+            records: mergedDirect,
             plans: plansExtracted,
             startDate: sorted[0],
             endDate: sorted[sorted.length - 1],

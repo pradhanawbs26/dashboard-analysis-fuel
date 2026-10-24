@@ -1455,16 +1455,33 @@ export function mergeWithYearlyRecords(incomingRecords: FuelRecord[]): FuelRecor
       console.warn(`mergeWithYearlyRecords: Discarding corrupted records for month ${ym} (1.00 L/J signature). Restoring clean baseline.`);
       return; // Skip this corrupted month so INITIAL_FUEL_DATA provides the clean data
     }
-    incomingMonths.add(ym);
+    // Only displace full baseline if incoming month has substantial records (> 25)
+    // Prevents 1-5 boundary rollover records from wiping the entire previous month
+    if (recs.length > 25) {
+      incomingMonths.add(ym);
+    }
     validIncoming.push(...recs);
   });
 
-  // Base records from INITIAL_FUEL_DATA for any month that is not in valid incoming records
+  // Base records from INITIAL_FUEL_DATA for any month that is not fully replaced
   const baseOtherMonths = INITIAL_FUEL_DATA.filter(r => {
     const ym = r.tanggal?.substring(0, 7);
     return !ym || !incomingMonths.has(ym);
   });
 
-  return [...baseOtherMonths, ...validIncoming];
+  // Merge and deduplicate by unique transaction key
+  const seenKeys = new Set<string>();
+  const combinedResults: FuelRecord[] = [];
+
+  [...baseOtherMonths, ...validIncoming].forEach(r => {
+    const key = r.id || `${r.idAlat}_${r.tanggal}_${r.jam}_${r.shift}`;
+    if (!seenKeys.has(key)) {
+      seenKeys.add(key);
+      combinedResults.push(r);
+    }
+  });
+
+  return combinedResults;
 }
+
 

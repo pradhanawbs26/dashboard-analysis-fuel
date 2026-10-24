@@ -1726,29 +1726,39 @@ export default function YearlyReview({
         });
       }
 
-      // Determine all months present in finalLogsToSync
-      const logMonths = Array.from(new Set(finalLogsToSync.map(r => {
-        if (!r.tanggal) return "";
+      // Count logs per month to separate genuine upload targets from edge rollover records
+      const monthLogCounts: Record<string, number> = {};
+      finalLogsToSync.forEach(r => {
+        if (!r.tanggal) return;
         const parts = r.tanggal.split("-");
         if (parts.length === 3) {
           const mIdx = parseInt(parts[1], 10) - 1;
-          if (mIdx >= 0 && mIdx < 12) return MONTH_NAMES_IND[mIdx];
+          if (mIdx >= 0 && mIdx < 12) {
+            const mName = MONTH_NAMES_IND[mIdx];
+            monthLogCounts[mName] = (monthLogCounts[mName] || 0) + 1;
+          }
         }
-        return "";
-      }))).filter(Boolean);
+      });
 
-      const allAffectedMonths = Array.from(new Set([...affectedMonths, ...logMonths, confirmedMonth]));
+      // Target months that should replace previous reports:
+      // Must be confirmedMonth OR have substantial logs (> 25 logs) in multi-month files.
+      // Small boundary rollovers (e.g. 1-10 logs on 30 Sep or 01 Nov) must NEVER wipe or overwrite full months!
+      const targetMonthsToReplace = Array.from(new Set([
+        confirmedMonth,
+        ...affectedMonths.filter(m => (monthLogCounts[m] || 0) > 25)
+      ]));
 
       // Prepare merged records across all months so they are completely persisted and available immediately
       let mergedRecords: FuelRecord[] = [];
       if (finalLogsToSync.length > 0) {
         const currentSavedRecords = getSyncLocalData<FuelRecord[]>("fuel_records", []);
 
-        // Filter out existing logs for affected months to prevent duplicate stacking
+        // Filter out existing logs ONLY for targetMonthsToReplace to prevent duplicate stacking
+        // Rollover records for other months will be safely merged and deduplicated
         const existingFiltered = currentSavedRecords.filter(r => {
           if (!r.tanggal) return true;
           const norm = normalizeDateToYMD(r.tanggal) || r.tanggal;
-          return !allAffectedMonths.some(mName => {
+          return !targetMonthsToReplace.some(mName => {
             const mIdx = getMonthFromText(mName);
             const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
             return mPad && norm.startsWith(`2026-${mPad}`);
@@ -1762,8 +1772,8 @@ export default function YearlyReview({
         }
       }
 
-      // Save each affected month report and its records to Cloud Firestore
-      for (const mName of allAffectedMonths) {
+      // Save each target month report and its records to Cloud Firestore
+      for (const mName of targetMonthsToReplace) {
         const mIdx = getMonthFromText(mName);
         const mPad = mIdx !== -1 ? String(mIdx + 1).padStart(2, "0") : "";
 
@@ -1880,9 +1890,10 @@ export default function YearlyReview({
       }
 
       // Merge into local state & storage for Yearly Review
-      const clean = dataPoints.filter(d => !allAffectedMonths.includes(d.bulan));
-      const nextPts = [...clean, ...aggregatedParsed];
-      const nextMonths = Array.from(new Set([...uploadedMonths, ...allAffectedMonths]));
+      const clean = dataPoints.filter(d => !targetMonthsToReplace.includes(d.bulan));
+      const targetAggregated = aggregatedParsed.filter(p => targetMonthsToReplace.includes(p.bulan));
+      const nextPts = [...clean, ...targetAggregated];
+      const nextMonths = Array.from(new Set([...uploadedMonths, ...targetMonthsToReplace]));
 
       setDataPoints(nextPts);
       setUploadedMonths(nextMonths);

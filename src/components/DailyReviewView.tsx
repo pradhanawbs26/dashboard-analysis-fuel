@@ -13,7 +13,6 @@ import {
   Clock,
   ChevronRight,
   ChevronDown,
-  ArrowUpDown,
   RefreshCw,
   Cloud,
   Database
@@ -103,6 +102,52 @@ function generateDatesBetween(start: string, end: string): string[] {
   return list;
 }
 
+/**
+ * Resolves the operational burn date and shift from a fueling log event.
+ * Domain Rule (Shift-based Full-to-Full Accounting):
+ * 1. Pengisian Shift 1 (Pagi) pada tanggal T -> Menutup konsumsi Shift 2 (Malam) tanggal T-1
+ * 2. Pengisian Shift 2 (Malam) pada tanggal T -> Menutup konsumsi Shift 1 (Siang) tanggal T
+ */
+export function resolveBurnDateAndShift(
+  tanggalStr: string,
+  shiftStr?: string,
+  jamStr?: string
+): { burnDate: string; burnShift: "Shift 1" | "Shift 2"; isPagiShift1Issue: boolean } {
+  const cleanDate = normalizeDateToYMD(tanggalStr) || tanggalStr;
+  const s = String(shiftStr || "").toLowerCase().trim();
+  const j = String(jamStr || "").toLowerCase().trim();
+
+  let isShift1Issue = false;
+
+  if (s.includes("shift 1") || s.includes("siang") || s.includes("day") || s === "1") {
+    isShift1Issue = true;
+  } else if (s.includes("shift 2") || s.includes("malam") || s.includes("night") || s === "2") {
+    isShift1Issue = false;
+  } else {
+    // Check hour: jam 04:00 - 14:59 = Shift 1 issue (pagi); otherwise Shift 2 issue (malam)
+    const hour = parseInt(j.split(":")[0], 10);
+    if (!isNaN(hour)) {
+      isShift1Issue = hour >= 4 && hour < 15;
+    } else {
+      isShift1Issue = true;
+    }
+  }
+
+  if (isShift1Issue) {
+    return {
+      burnDate: getPreviousDay(cleanDate),
+      burnShift: "Shift 2",
+      isPagiShift1Issue: true
+    };
+  } else {
+    return {
+      burnDate: cleanDate,
+      burnShift: "Shift 1",
+      isPagiShift1Issue: false
+    };
+  }
+}
+
 export interface DayAggCell {
   date: string;
   volumeFuel: number;
@@ -113,6 +158,10 @@ export interface DayAggCell {
   isOverPlan: boolean;
   isHmZero: boolean;
   isHmMundur: boolean;
+  shift1Volume: number;
+  shift1Hm: number;
+  shift2Volume: number;
+  shift2Hm: number;
   notes: string[];
 }
 
@@ -141,8 +190,6 @@ export interface AnomalyNoteItem {
   tipeAnomali: "HM_NOL" | "HM_MUNDUR";
   keterangan: string;
 }
-
-export type DateAccountingMode = "rollover_next_month" | "full_to_full" | "log_date";
 
 export default function DailyReviewView({
   records,
@@ -303,9 +350,6 @@ export default function DailyReviewView({
     }
   }, [initialStartDate, initialEndDate, records, availableMonthsInRecords, startDate]);
 
-  // Accounting Mode: Default to "rollover_next_month" per mining operations requirement:
-  // Pengisian tgl 1 Oktober diambil sebagai konsumsi akhir bulan tanggal 30 September
-  const [dateAccountingMode, setDateAccountingMode] = useState<DateAccountingMode>("rollover_next_month");
 
   // Derived active selected month in dropdown selector
   const activeMonthSelectValue = useMemo(() => {
@@ -386,39 +430,28 @@ export default function DailyReviewView({
           isOverPlan: false,
           isHmZero: false,
           isHmMundur: false,
+          shift1Volume: 0,
+          shift1Hm: 0,
+          shift2Volume: 0,
+          shift2Hm: 0,
           notes: []
         });
       });
 
-      // Aggregate records into corresponding date
+      // Aggregate records into corresponding operational burn date and shift
       unitRecs.forEach(r => {
         if (!r.tanggal) return;
         
-        // Determine the target date based on accounting mode (guarantee clean YYYY-MM-DD format)
-        const cleanDate = normalizeDateToYMD(r.tanggal) || r.tanggal;
-        let targetDate = cleanDate;
-        let isRolloverApplied = false;
-        
-        if (dateAccountingMode === "full_to_full") {
-          targetDate = getPreviousDay(cleanDate);
-        } else if (dateAccountingMode === "rollover_next_month") {
-          // If transaction is logged on the 1st of a month (e.g. 2026-10-01),
-          // and the reviewed period includes the last day of the previous month (e.g. 2026-09-30),
-          // map this record as the operational consumption of the month's final day!
-          if (cleanDate.endsWith("-01")) {
-            const prevDay = getPreviousDay(cleanDate);
-            if (dailyMap.has(prevDay)) {
-              targetDate = prevDay;
-              isRolloverApplied = true;
-            }
-          }
-        }
-        
-        // Only include if date falls in active range
-        if (dailyMap.has(targetDate)) {
-          const cell = dailyMap.get(targetDate)!;
-          if (isRolloverApplied) {
-            cell.notes.push(`Log pengisian ${r.tanggal} ditarik sebagai konsumsi akhir bulan ${targetDate}`);
+        const { burnDate, burnShift, isPagiShift1Issue } = resolveBurnDateAndShift(r.tanggal, r.shift, r.jam);
+
+        if (dailyMap.has(burnDate)) {
+          const cell = dailyMap.get(burnDate)!;
+          if (isPagiShift1Issue) {
+            cell.shift2Volume += r.volumeFuel;
+            cell.notes.push(`Pengisian ${r.tanggal} (${r.shift || 'Shift 1 Pagi'}) ➔ Konsumsi Shift 2 Malam ${burnDate}`);
+          } else {
+            cell.shift1Volume += r.volumeFuel;
+            cell.notes.push(`Pengisian ${r.tanggal} (${r.shift || 'Shift 2 Malam'}) ➔ Konsumsi Shift 1 Siang ${burnDate}`);
           }
           cell.volumeFuel += r.volumeFuel;
           cell.hasFuel = cell.volumeFuel > 0;
@@ -429,7 +462,7 @@ export default function DailyReviewView({
             cell.isHmMundur = true;
             cell.notes.push(`HM Mundur: ${r.hmSebelum} -> ${r.hmSaatIni} (${selisih.toFixed(1)} Jam)`);
             anomalies.push({
-              tanggal: targetDate,
+              tanggal: burnDate,
               idAlat: rawId,
               egy: rawEgy,
               hmSebelum: r.hmSebelum,
@@ -437,13 +470,13 @@ export default function DailyReviewView({
               selisihHm: selisih,
               volumeFuel: r.volumeFuel,
               tipeAnomali: "HM_MUNDUR",
-              keterangan: `HM Mundur sebesar ${selisih.toFixed(1)} Jam. HM tercatat mundur dari ${r.hmSebelum} menjadi ${r.hmSaatIni}.`
+              keterangan: `HM Mundur sebesar ${selisih.toFixed(1)} Jam pada ${burnShift}. HM tercatat mundur dari ${r.hmSebelum} menjadi ${r.hmSaatIni}.`
             });
           } else if (selisih === 0 && r.volumeFuel > 0) {
             cell.isHmZero = true;
             cell.notes.push(`HM Nol: ${r.hmSebelum} (0 Jam, Solar: ${r.volumeFuel} L)`);
             anomalies.push({
-              tanggal: targetDate,
+              tanggal: burnDate,
               idAlat: rawId,
               egy: rawEgy,
               hmSebelum: r.hmSebelum,
@@ -451,7 +484,7 @@ export default function DailyReviewView({
               selisihHm: 0,
               volumeFuel: r.volumeFuel,
               tipeAnomali: "HM_NOL",
-              keterangan: `HM Nol (0.0 Jam Operasi). Solar terisi ${r.volumeFuel} L tanpa adanya pergerakan HM.`
+              keterangan: `HM Nol (0.0 Jam Operasi) pada ${burnShift}. Solar terisi ${r.volumeFuel} L tanpa adanya pergerakan HM.`
             });
           }
 
@@ -460,6 +493,11 @@ export default function DailyReviewView({
           if (!r.isAnomaly && effectiveHm > 0) {
             cell.selisihHm += effectiveHm;
             cell.hasOperation = true;
+            if (isPagiShift1Issue) {
+              cell.shift2Hm += effectiveHm;
+            } else {
+              cell.shift1Hm += effectiveHm;
+            }
           }
         }
       });
@@ -519,7 +557,7 @@ export default function DailyReviewView({
       totalPeriodFuel: periodFuel,
       totalPeriodHm: periodHm
     };
-  }, [records, selectedEgy, startDate, endDate, dateColumns, dateAccountingMode, unitPlans, egyPlans]);
+  }, [records, selectedEgy, startDate, endDate, dateColumns, unitPlans, egyPlans]);
 
   // Toggle filter to only display active units (units with fuel or HM transactions in the selected period)
   const [showOnlyActiveUnits, setShowOnlyActiveUnits] = useState(true);
@@ -551,10 +589,7 @@ export default function DailyReviewView({
       return;
     }
 
-    const accountingModeLabel = 
-      dateAccountingMode === "rollover_next_month" 
-        ? "Rollover Akhir Bulan (Tgl 1 ke Akhir Bulan Sebelumnya)" 
-        : (dateAccountingMode === "full_to_full" ? "Konsumsi H-1 (Standar Full-to-Full)" : "Tanggal Pengisian Log Asli (H)");
+    const accountingModeLabel = "Standar Full-to-Full Berkesinambungan (Shift 1 Siang & Shift 2 Malam)";
 
     const wb = XLSX.utils.book_new();
     const headersDate = dateColumns.map(d => formatColHeaderDate(d));
@@ -784,33 +819,23 @@ export default function DailyReviewView({
               </div>
             </div>
 
-            {/* METODE PERHITUNGAN TANGGAL: ROLLOVER AKHIR BULAN VS FULL-TO-FULL VS TANGGAL FISIK */}
+            {/* METODE PERHITUNGAN: STANDAR FULL-TO-FULL BERKESINAMBUNGAN */}
             <div className="flex flex-col justify-end">
-              <label className="text-[10px] font-bold text-slate-400 uppercase tracking-wider mb-1 flex items-center gap-1">
-                <span>METODE TANGGAL</span>
+              <label className="text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1 flex items-center gap-1">
+                <span>METODE KALKULASI</span>
                 <span 
-                  title="Pilihan metode penanggalan: 
-1. Rollover Akhir Bulan: Pengisian tgl 1 dihitung sebagai konsumsi tgl 30/31 akhir bulan sebelumnya.
-2. Konsumsi H-1 (Full-to-Full): Seluruh tanggal pengisian digeser 1 hari ke belakang.
-3. Tanggal Fisik (H): Mengikuti tanggal persis di log transaksi."
+                  title="Standar Otomatis Full-to-Full Berkesinambungan:
+• Pengisian Shift 1 (Pagi) = Konsumsi Shift 2 (Malam) kemarin.
+• Pengisian Shift 2 (Malam) = Konsumsi Shift 1 (Siang) hari ini.
+• Berkesinambungan otomatis menyeberang akhir & awal bulan."
                   className="cursor-help"
                 >
-                  <HelpCircle className="w-3.5 h-3.5 text-slate-400" />
+                  <Info className="w-3.5 h-3.5 text-[#4682B4]" />
                 </span>
               </label>
-              <div className="relative">
-                <select
-                  value={dateAccountingMode}
-                  onChange={(e) => setDateAccountingMode(e.target.value as DateAccountingMode)}
-                  className="text-xs font-bold border border-slate-300 rounded-lg pl-3 pr-8 py-2 bg-slate-50 text-slate-800 focus:border-[#4682B4] focus:outline-none cursor-pointer shadow-2xs appearance-none"
-                >
-                  <option value="rollover_next_month">🔄 Rollover Akhir Bulan (Tgl 1 ➔ Akhir Bln)</option>
-                  <option value="full_to_full">⏱️ Konsumsi H-1 (Full-to-Full)</option>
-                  <option value="log_date">📅 Tanggal Fisik Asli (H)</option>
-                </select>
-                <div className="pointer-events-none absolute inset-y-0 right-0 flex items-center px-2 text-slate-500">
-                  <ArrowUpDown className="w-3.5 h-3.5" />
-                </div>
+              <div className="flex items-center gap-1.5 px-3 py-2 bg-slate-50 border border-slate-300 rounded-lg shadow-2xs text-xs font-semibold text-slate-700">
+                <CheckCircle2 className="w-4 h-4 text-emerald-600 flex-shrink-0" />
+                <span className="whitespace-nowrap">Full-to-Full Otomatis (Per Shift)</span>
               </div>
             </div>
 
@@ -1163,7 +1188,7 @@ export default function DailyReviewView({
                               }`}
                               title={
                                 hasBurn
-                                  ? `${u.idAlat} (${d}): Fuel Burn ${cell.fuelBurn} L/Jam (Plan: ${u.targetPlan})`
+                                  ? `${u.idAlat} (${d}): Fuel Burn ${cell.fuelBurn} L/Jam (Plan: ${u.targetPlan}) | Total: ${cell.volumeFuel} L, ${cell.selisihHm} Jam${cell.shift1Volume > 0 || cell.shift2Volume > 0 ? ` [Shift 1 Siang: ${cell.shift1Volume} L / ${cell.shift1Hm} Jam; Shift 2 Malam: ${cell.shift2Volume} L / ${cell.shift2Hm} Jam]` : ""}`
                                   : hasAnomaly
                                   ? cell.notes.join(" | ")
                                   : "Tidak beroperasi"
@@ -1273,7 +1298,7 @@ export default function DailyReviewView({
                             className={`px-2 py-2 text-center text-[11px] border-r border-slate-200 ${
                               vol > 0 ? "text-slate-800 font-bold bg-blue-50/30" : "text-slate-300 font-normal"
                             }`}
-                            title={vol > 0 ? `${u.idAlat} (${d}): ${vol.toLocaleString("id-ID")} Liter` : "-"}
+                            title={vol > 0 ? `${u.idAlat} (${d}): Total ${vol.toLocaleString("id-ID")} Liter${cell.shift1Volume > 0 || cell.shift2Volume > 0 ? ` (Shift 1 Siang: ${cell.shift1Volume} L, Shift 2 Malam: ${cell.shift2Volume} L)` : ""}` : "-"}
                           >
                             {vol > 0 ? vol.toLocaleString("id-ID") : "-"}
                           </td>
@@ -1377,7 +1402,7 @@ export default function DailyReviewView({
                                 : isZero
                                 ? `Catatan: ${cell?.notes.join(" | ")}`
                                 : hm > 0
-                                ? `${u.idAlat} (${d}): ${hm.toFixed(1)} Jam Kerja`
+                                ? `${u.idAlat} (${d}): Total ${hm.toFixed(1)} Jam Kerja${cell?.shift1Hm || cell?.shift2Hm ? ` (Shift 1 Siang: ${cell.shift1Hm} Jam, Shift 2 Malam: ${cell.shift2Hm} Jam)` : ""}`
                                 : "Tidak beroperasi"
                             }
                           >
